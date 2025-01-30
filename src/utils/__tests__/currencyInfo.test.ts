@@ -1,5 +1,5 @@
 import { binanceClient } from '../../init';
-import { ExchangeInfo } from 'binance-api-node';
+import { ExchangeInfo, FuturesOrderType_LT } from 'binance-api-node';
 import {
   getLotSizeQuantityRules,
   getMinOrderQuantity,
@@ -10,7 +10,7 @@ import {
 } from '../currencyInfo';
 
 describe('Currency Info', () => {
-  let exchangeInfo: ExchangeInfo;
+  let exchangeInfo: ExchangeInfo<FuturesOrderType_LT>;
 
   beforeAll(async () => {
     exchangeInfo = await binanceClient.futuresExchangeInfo();

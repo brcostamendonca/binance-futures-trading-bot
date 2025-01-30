@@ -1,5 +1,5 @@
 import colors from 'ansi-colors';
-import { CandleChartInterval, ExchangeInfo, OrderSide } from 'binance-api-node';
+import { CandleChartInterval, ExchangeInfo, OrderSide, FuturesOrderType_LT } from 'binance-api-node';
 import chalk from 'chalk';
 import cliProgress from 'cli-progress';
 import dayjs from 'dayjs';
@@ -110,6 +110,9 @@ export class BasicBackTestBot {
   // To generate the html report
   private chartLabels: string[] = [];
   private chartData: number[] = [];
+
+  // Update the exchangeInfo type in the backtest bot
+  private exchangeInfo: ExchangeInfo<FuturesOrderType_LT>;
 
   constructor(
     strategyConfigs: StrategyConfig[],
@@ -787,7 +790,7 @@ export class BasicBackTestBot {
     strategyConfig: StrategyConfig,
     currentPrice: number,
     candles: CandlesDataMultiTimeFrames,
-    exchangeInfo: ExchangeInfo
+    exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
   ) {
     const {
       asset,
@@ -1147,7 +1150,7 @@ export class BasicBackTestBot {
     pair: string,
     currentPrice: number,
     date: Date,
-    exchangeInfo: ExchangeInfo
+    exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
   ) {
     const position = this.wallet.positions.find((pos) => pos.pair === pair);
     const { margin, unrealizedProfit, size, positionSide } = position;

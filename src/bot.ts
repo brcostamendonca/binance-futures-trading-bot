@@ -4,6 +4,8 @@ import {
   FuturesAccountInfoResult,
   OrderSide,
   OrderType,
+  FuturesOrderType_LT,
+  TimeInForce
 } from 'binance-api-node';
 import { decimalFloor } from './utils/math';
 import { log, error, logBuySellExecutionOrder } from './utils/log';
@@ -23,7 +25,7 @@ import { getPricePrecision, getQuantityPrecision } from './utils/currencyInfo';
 export class Bot {
   private strategyConfigs: StrategyConfig[];
 
-  private exchangeInfo: ExchangeInfo;
+  private exchangeInfo: ExchangeInfo<FuturesOrderType_LT>;
   private accountInfo: FuturesAccountInfoResult;
   private hasOpenPosition: { [pair: string]: boolean };
 
@@ -362,13 +364,14 @@ export class Bot {
                   side: OrderSide.SELL,
                   type: OrderType.LIMIT,
                   symbol: pair,
-                  price,
+                  price: price.toString(),
                   quantity: String(
                     decimalFloor(
                       quantity * quantityPercentage,
                       quantityPrecision
                     )
                   ),
+                  timeInForce: TimeInForce.GTC
                 })
                 .catch(error);
             });
@@ -381,7 +384,7 @@ export class Bot {
                   side: OrderSide.SELL,
                   type: OrderType.STOP_MARKET,
                   symbol: pair,
-                  stopPrice: stopLoss,
+                  stopPrice: stopLoss.toString(),
                   closePosition: 'true',
                 })
                 .catch(error);
@@ -391,8 +394,8 @@ export class Bot {
                   side: OrderSide.SELL,
                   type: OrderType.STOP,
                   symbol: pair,
-                  stopPrice: stopLoss,
-                  price: stopLoss,
+                  stopPrice: stopLoss.toString(),
+                  price: stopLoss.toString(),
                   quantity: String(quantity),
                 })
                 .catch(error);
@@ -481,13 +484,14 @@ export class Bot {
                   side: OrderSide.BUY,
                   type: OrderType.LIMIT,
                   symbol: pair,
-                  price: price,
+                  price: price.toString(),
                   quantity: String(
                     decimalFloor(
                       quantity * quantityPercentage,
                       quantityPrecision
                     )
                   ),
+                  timeInForce: TimeInForce.GTC
                 })
                 .catch(error);
             });
@@ -500,7 +504,7 @@ export class Bot {
                   side: OrderSide.BUY,
                   type: OrderType.STOP_MARKET,
                   symbol: pair,
-                  stopPrice: stopLoss,
+                  stopPrice: stopLoss.toString(),
                   closePosition: 'true',
                 })
                 .catch(error);
@@ -510,8 +514,8 @@ export class Bot {
                   side: OrderSide.BUY,
                   type: OrderType.STOP,
                   symbol: pair,
-                  stopPrice: stopLoss,
-                  price: stopLoss,
+                  stopPrice: stopLoss.toString(),
+                  price: stopLoss.toString(),
                   quantity: String(quantity),
                 })
                 .catch(error);

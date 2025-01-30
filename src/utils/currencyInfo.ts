@@ -1,4 +1,4 @@
-import { ExchangeInfo } from 'binance-api-node';
+import { ExchangeInfo, FuturesOrderType_LT } from 'binance-api-node';
 import { decimalCeil } from './math';
 
 /**
@@ -7,7 +7,7 @@ import { decimalCeil } from './math';
 export function isValidQuantity(
   quantity: number,
   pair: string,
-  exchangeInfo: ExchangeInfo
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
 ) {
   const rules = getLotSizeQuantityRules(pair, exchangeInfo);
   return (
@@ -23,7 +23,7 @@ export function getMinOrderQuantity(
   asset: string,
   base: string,
   basePrice: number,
-  exchangeInfo: ExchangeInfo
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
 ) {
   const precision = getQuantityPrecision(asset + base, exchangeInfo);
   const minimumNotionalValue = 5; // threshold in USDT
@@ -37,7 +37,7 @@ export function getMinOrderQuantity(
  */
 export function getLotSizeQuantityRules(
   pair: string,
-  exchangeInfo: ExchangeInfo
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
 ) {
   // @ts-ignore
   const { minQty, maxQty, stepSize } = exchangeInfo.symbols
@@ -55,7 +55,10 @@ export function getLotSizeQuantityRules(
 /**
  * Get the maximal number of decimals for a pair quantity
  */
-export function getQuantityPrecision(pair: string, exchangeInfo: ExchangeInfo) {
+export function getQuantityPrecision(
+  pair: string,
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
+): number {
   const symbol = exchangeInfo.symbols.find((symbol) => symbol.symbol === pair);
   // @ts-ignore
   return symbol.quantityPrecision as number;
@@ -64,7 +67,10 @@ export function getQuantityPrecision(pair: string, exchangeInfo: ExchangeInfo) {
 /**
  * Get the maximal number of decimals for a pair quantity
  */
-export function getPricePrecision(pair: string, exchangeInfo: ExchangeInfo) {
+export function getPricePrecision(
+  pair: string,
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
+): number {
   const tickSize = getTickSize(pair, exchangeInfo);
   if (tickSize.toString().split('.').length > 0) {
     return tickSize.toString().split('.')[1].length;
@@ -76,7 +82,10 @@ export function getPricePrecision(pair: string, exchangeInfo: ExchangeInfo) {
 /**
  * Get the tick size for a symbol
  */
-export function getTickSize(pair: string, exchangeInfo: ExchangeInfo) {
+export function getTickSize(
+  pair: string, 
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
+) {
   const symbol = exchangeInfo.symbols.find((symbol) => symbol.symbol === pair);
   const filter = symbol.filters.find((f) => f.filterType === 'PRICE_FILTER');
   // @ts-ignore

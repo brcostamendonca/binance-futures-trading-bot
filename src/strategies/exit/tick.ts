@@ -1,4 +1,4 @@
-import { ExchangeInfo, OrderSide } from 'binance-api-node';
+import { ExchangeInfo, FuturesOrderType_LT, OrderSide } from 'binance-api-node';
 import { getTickSize } from '../../utils/currencyInfo';
 import { decimalCeil, decimalFloor } from '../../utils/math';
 
@@ -12,7 +12,7 @@ const strategy = (
   candles: CandleData[],
   pricePrecision: number,
   side: OrderSide,
-  exchangeInfo: ExchangeInfo,
+  exchangeInfo: ExchangeInfo<FuturesOrderType_LT>,
   options: Options
 ) => {
   let tickSize = getTickSize(candles[0].symbol, exchangeInfo);
