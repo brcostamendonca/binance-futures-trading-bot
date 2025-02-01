@@ -97,7 +97,7 @@ export const hyperParameters = hyperParameters_BTCUSDT;
 
 export const config: AbstractStrategyConfig = (parameters) => [
   {
-    asset: 'BTC',
+    asset: 'ETH',
     base: 'USDT',
     loopInterval: CandleChartInterval.ONE_HOUR,
     indicatorIntervals: [CandleChartInterval.ONE_HOUR],
