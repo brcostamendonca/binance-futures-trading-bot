@@ -77,16 +77,16 @@ export const config: AbstractStrategyConfig = (parameters) => [
   {
     asset: 'BTC',  // Changed to BTC
     base: 'USDT',
-    loopInterval: CandleChartInterval.THIRTY_MINUTES, // Balance between opportunities and noise
-    indicatorIntervals: [CandleChartInterval.THIRTY_MINUTES],
+    loopInterval: CandleChartInterval.FIFTEEN_MINUTES, // Balance between opportunities and noise
+    indicatorIntervals: [CandleChartInterval.FIFTEEN_MINUTES],
     risk: 0.015, // 1.5% risk per trade - More conservative
-    leverage: 10,
+    leverage: 3,
     unidirectional: false,
     canOpenNewPositionToCloseLast: true,
     exitStrategy: (price, candles, pricePrecision, side, exchangeInfo) =>
       tickExitStrategy(
         price,
-        candles[CandleChartInterval.THIRTY_MINUTES],
+        candles[CandleChartInterval.FIFTEEN_MINUTES],
         pricePrecision,
         side,
         exchangeInfo,
@@ -110,7 +110,7 @@ export const config: AbstractStrategyConfig = (parameters) => [
       ),
     buyStrategy: (candles) =>
       Complex.BITCOIN_SNIPER_V1.isBuySignal(
-        candles[CandleChartInterval.THIRTY_MINUTES],
+        candles[CandleChartInterval.FIFTEEN_MINUTES],
         {
           ...Object.entries(parameters).reduce(
             (prev, cur) => ({ [cur[0]]: cur[1].value, ...prev }),
@@ -120,7 +120,7 @@ export const config: AbstractStrategyConfig = (parameters) => [
       ),
     sellStrategy: (candles) =>
       Complex.BITCOIN_SNIPER_V1.isSellSignal(
-        candles[CandleChartInterval.THIRTY_MINUTES],
+        candles[CandleChartInterval.FIFTEEN_MINUTES],
         {
           ...Object.entries(parameters).reduce(
             (prev, cur) => ({ [cur[0]]: cur[1].value, ...prev }),
