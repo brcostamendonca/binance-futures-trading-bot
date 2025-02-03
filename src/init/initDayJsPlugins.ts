@@ -4,6 +4,7 @@ export let pluginNames: string[] = [
   'isBetween',
   'isSameOrBefore',
   'isSameOrAfter',
+  'utc',
 ];
 
 let plugins: PluginFunc[] = pluginNames.map((plugin) =>
@@ -16,6 +17,7 @@ let plugins: PluginFunc[] = pluginNames.map((plugin) =>
  */
 export function initializeDayJsPlugins() {
   plugins.forEach((plugin) => dayjs.extend(plugin));
+  dayjs.utc();
 }
 
 declare module 'dayjs' {
@@ -29,4 +31,6 @@ declare module 'dayjs' {
       d?: '()' | '[]' | '[)' | '(]'
     ): boolean;
   }
+
+  export function utc(): typeof dayjs;
 }

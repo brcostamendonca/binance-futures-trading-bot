@@ -21,12 +21,17 @@
 ## Setup the environment
 
 ## Install npm and dependecies
+
 ### Linux
+
 ```bash
 sudo rm -rf node_modules package-lock.json && npm install
 ```
+
 ### Windows
+
 remove directory node_modules and remove file package-lock.json
+
 ```bash
 npm install
 ```
@@ -67,7 +72,7 @@ You can create your own strategy for your bot. The file must be placed in `src/c
 You can backtest your strategy by running the backtest mode. To do that, you need to:
 
 1. Configure the properties for your backtest in `config.json`.
-2. Tap the commands `npm build:test` and `npm run test` to run the backtest.
+2. Tap the commands `npm run build:test` and `npm run test` to run the backtest.
 3. When the backtest ends, it generates a log file in the folder `logs` and an html report in `reports`. You can consulting these to evaluate the performance and profitability of your strategy (note that the results in real will be a little different cause of the funding rates).
 
 ## Configure the Telegram Channel
