@@ -8,6 +8,19 @@ import { logger } from '../init';
  * @param message
  * @param date
  */
+export function debug(message: string, date = Date.now()) {
+  if (process.env.DEBUG === 'true') {
+    const logDate = dayjs(date).format('YYYY-MM-DD HH:mm:ss');
+    logger.debug(`${logDate} : ${message}`);
+    console.debug(`${chalk.blue(logDate)} : ${message}`);
+  }
+}
+
+/**
+ * Main function add a log
+ * @param message
+ * @param date
+ */
 export function log(message: string, date = Date.now()) {
   const logDate = dayjs(date).format('YYYY-MM-DD HH:mm:ss');
   logger.info(`${logDate} : ${message}`);
@@ -44,20 +57,18 @@ export function logBuySellExecutionOrder(
   takeProfits: { price: number; quantityPercentage: number }[],
   stopLoss: number
 ) {
-  let introPhrase = `Open a ${
-    orderSide === OrderSide.BUY ? 'long' : 'short'
-  } position on ${asset}${base} at the price ${price} with a size of ${quantity}${asset}`;
+  let introPhrase = `Open a ${orderSide === OrderSide.BUY ? 'long' : 'short'
+    } position on ${asset}${base} at the price ${price} with a size of ${quantity}${asset}`;
 
-  let tp = `TP: ${
-    takeProfits.length > 0
-      ? takeProfits
-          .map(
-            (takeProfit) =>
-              `[${takeProfit.price} => ${takeProfit.quantityPercentage * 100}%]`
-          )
-          .join(' ')
-      : '----'
-  }`;
+  let tp = `TP: ${takeProfits.length > 0
+    ? takeProfits
+      .map(
+        (takeProfit) =>
+          `[${takeProfit.price} => ${takeProfit.quantityPercentage * 100}%]`
+      )
+      .join(' ')
+    : '----'
+    }`;
 
   let sl = `SL: ${stopLoss ? `[${stopLoss} => 100%]` : '----'}`;
 

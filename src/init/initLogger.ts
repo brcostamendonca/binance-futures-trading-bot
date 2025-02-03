@@ -7,17 +7,26 @@ const loggerFilePath = {
   test: 'logs/bot-test.log',
 };
 
+// Only enable debug level if DEBUG is explicitly set to 'true'
+const getLogLevel = () => {
+  return process.env.DEBUG === 'true' ? 'debug' : 'info';
+};
+
 if (fs.existsSync(loggerFilePath[process.env.NODE_ENV])) {
   fs.unlinkSync(loggerFilePath[process.env.NODE_ENV]);
 }
 
 export const initLogger = () =>
   createLogger({
-    level: 'info',
-    format: format.simple(),
+    level: getLogLevel(),
+    format: format.combine(
+      format.timestamp(),
+      format.simple()
+    ),
     transports: [
       new transports.File({
         filename: loggerFilePath[process.env.NODE_ENV],
-      }),
+        level: getLogLevel()
+      })
     ],
   });

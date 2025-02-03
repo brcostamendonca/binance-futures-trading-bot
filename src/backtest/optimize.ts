@@ -50,6 +50,7 @@ if (process.env.NODE_ENV === 'test') {
         // A range between two value
         if (
           typeof optimization[0] === 'number' &&
+          typeof optimization[1] === 'number' &&
           optimization.length === 2 &&
           optimization[0] < optimization[1]
         ) {

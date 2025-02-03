@@ -8,7 +8,7 @@ import {
   TimeInForce
 } from 'binance-api-node';
 import { decimalFloor } from './utils/math';
-import { log, error, logBuySellExecutionOrder } from './utils/log';
+import { log, error, logBuySellExecutionOrder, debug } from './utils/log';
 import { binanceClient } from './init';
 import { loadCandlesMultiTimeFramesFromAPI } from './utils/loadCandleData';
 import { Counter } from './tools/counter';
@@ -112,10 +112,21 @@ export class Bot {
         pair,
         strategyConfig.loopInterval,
         (candle) => {
+          if (candle.isFinal) {
+            debug(`Received candle data for ${pair}:`);
+            debug(`- Open: ${candle.open}`);
+            debug(`- High: ${candle.high}`);
+            debug(`- Low: ${candle.low}`);
+            debug(`- Close: ${candle.close}`);
+            debug(`- Volume: ${candle.volume}`);
+            debug(`- Is final: ${candle.isFinal}`);
+          }
+
           // If a position has been closed, cancel the open orders
           this.manageOpenOrders(pair);
 
           if (candle.isFinal) {
+            debug(`Processing final candle for ${pair}`);
             // Load the candle data for each the time frames that will be use on the strategy
             loadCandlesMultiTimeFramesFromAPI(
               pair,
@@ -211,19 +222,40 @@ export class Bot {
     const positionSize = Math.abs(Number(position.positionAmt));
     const positionEntryPrice = Number(position.entryPrice);
 
+    // Add debug logs for position state
+    debug(`Current position state for ${pair}:`);
+    debug(`- Has long position: ${hasLongPosition}`);
+    debug(`- Has short position: ${hasShortPosition}`);
+    debug(`- Position size: ${positionSize}`);
+    debug(`- Entry price: ${positionEntryPrice}`);
+    debug(`- Current price: ${currentPrice}`);
+
     // Open Orders
     const currentOpenOrders = await binanceClient.futuresOpenOrders({
       symbol: pair,
     });
 
+    // Log open orders
+    debug(`Open orders for ${pair}: ${currentOpenOrders.length}`);
+    if (currentOpenOrders.length > 0) {
+      currentOpenOrders.forEach(order => {
+        debug(`- Order: ${order.side} ${order.type} at ${order.price}, amount: ${order.origQty}`);
+      });
+    }
+
     // Check the trend
     const useLongPosition = trendFilter ? trendFilter(candles) === 1 : true;
     const useShortPosition = trendFilter ? trendFilter(candles) === -1 : true;
 
+    // Log trend state
+    debug(`Trend state for ${pair}:`);
+    debug(`- Can use long position: ${useLongPosition}`);
+    debug(`- Can use short position: ${useShortPosition}`);
+
     // Conditions to take or not a position
     const canAddToPosition = allowPyramiding
       ? Number(position.initialMargin) + Number(assetBalance) * risk <=
-        Number(assetBalance) * maxPyramidingAllocation
+      Number(assetBalance) * maxPyramidingAllocation
       : false;
     const canTakeLongPosition =
       (canOpenNewPositionToCloseLast && hasShortPosition) ||
@@ -248,15 +280,32 @@ export class Bot {
         currentOpenOrders.length > 0 &&
         canOpenNewPositionToCloseLast);
 
-    // Precision
-    const pricePrecision = getPricePrecision(pair, this.exchangeInfo);
-    const quantityPrecision = getQuantityPrecision(pair, this.exchangeInfo);
+    // Log strategy signals
+    if (buyStrategy) {
+      const buySignal = buyStrategy(candles);
+      debug(`Buy strategy signal for ${pair}: ${buySignal ? 'YES' : 'NO'}`);
+    }
+    if (sellStrategy) {
+      const sellSignal = sellStrategy(candles);
+      debug(`Sell strategy signal for ${pair}: ${sellSignal ? 'YES' : 'NO'}`);
+    }
 
-    // Check if we are in the trading sessions
-    const isTradingSessionActive = isOnTradingSession(
+    // Check if we're in a valid trading session
+    const isValidTradingSession = !tradingSessions || isOnTradingSession(
       candles[loopInterval][candles[loopInterval].length - 1].closeTime,
       tradingSessions
     );
+    debug(`Valid trading session: ${isValidTradingSession}`);
+
+    // Log position taking conditions
+    debug(`Position taking conditions for ${pair}:`);
+    debug(`- Can add to position: ${canAddToPosition}`);
+    debug(`- Can take long position: ${canTakeLongPosition}`);
+    debug(`- Can take short position: ${canTakeShortPosition}`);
+
+    // Precision
+    const pricePrecision = getPricePrecision(pair, this.exchangeInfo);
+    const quantityPrecision = getQuantityPrecision(pair, this.exchangeInfo);
 
     // The current position is too long
     if (
@@ -294,7 +343,7 @@ export class Bot {
     }
 
     if (
-      (isTradingSessionActive || positionSize !== 0) &&
+      (isValidTradingSession || positionSize !== 0) &&
       canTakeLongPosition &&
       buyStrategy(candles)
     ) {
@@ -325,12 +374,12 @@ export class Bot {
       // Calculate TP and SL
       let { takeProfits, stopLoss } = exitStrategy
         ? exitStrategy(
-            currentPrice,
-            candles,
-            pricePrecision,
-            OrderSide.BUY,
-            this.exchangeInfo
-          )
+          currentPrice,
+          candles,
+          pricePrecision,
+          OrderSide.BUY,
+          this.exchangeInfo
+        )
         : { takeProfits: [], stopLoss: null };
 
       //Calculate the quantity for the position according to the risk management of the strategy
@@ -414,7 +463,7 @@ export class Bot {
         })
         .catch(error);
     } else if (
-      (isTradingSessionActive || positionSize !== 0) &&
+      (isValidTradingSession || positionSize !== 0) &&
       canTakeShortPosition &&
       sellStrategy(candles)
     ) {
@@ -445,12 +494,12 @@ export class Bot {
       // Calculate TP and SL
       let { takeProfits, stopLoss } = exitStrategy
         ? exitStrategy(
-            currentPrice,
-            candles,
-            pricePrecision,
-            OrderSide.SELL,
-            this.exchangeInfo
-          )
+          currentPrice,
+          candles,
+          pricePrecision,
+          OrderSide.SELL,
+          this.exchangeInfo
+        )
         : { takeProfits: [], stopLoss: null };
 
       // Calculate the quantity for the position according to the risk management of the strategy
@@ -580,9 +629,8 @@ export class Bot {
     );
 
     let emoji = performance >= 0 ? '🟢' : '🔴';
-    let message = `Day result of ${this.currentDay}: ${
-      performance > 0 ? `<b>+${performance}%</b>` : `${performance}%`
-    } ${emoji}`;
+    let message = `Day result of ${this.currentDay}: ${performance > 0 ? `<b>+${performance}%</b>` : `${performance}%`
+      } ${emoji}`;
 
     sendTelegramMessage(message);
   }
@@ -593,7 +641,7 @@ export class Bot {
   private sendMonthResult() {
     let performance = decimalFloor(
       ((this.currentBalance - this.lastMonthBalance) / this.lastMonthBalance) *
-        100,
+      100,
       2
     );
 
@@ -601,16 +649,16 @@ export class Bot {
       performance > 30
         ? '🤩'
         : performance > 20
-        ? '🤑'
-        : performance > 10
-        ? '😍'
-        : performance > 0
-        ? '🥰'
-        : performance > -10
-        ? '😢'
-        : performance > -20
-        ? '😰'
-        : '😭';
+          ? '🤑'
+          : performance > 10
+            ? '😍'
+            : performance > 0
+              ? '🥰'
+              : performance > -10
+                ? '😢'
+                : performance > -20
+                  ? '😰'
+                  : '😭';
 
     let message =
       `<b>MONTH RESULT - ${this.currentMonth}</b>` +

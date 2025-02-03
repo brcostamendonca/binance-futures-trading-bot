@@ -17,6 +17,7 @@ import {
   EMA,
   ADX,
 } from '../../../indicators';
+import { debug } from '../../../utils/log';
 
 interface Options {
   adxType?: 'CLASSIC' | 'MASANAKAMURA';
@@ -308,8 +309,8 @@ const scalpingCondition = (
     lookBack,
   }).slice(-2);
   return {
-    scalpingLongSignal: tradeDirection[0] === 0 && tradeDirection[1] === 1,
-    scalpingShortSignal: tradeDirection[0] === 0 && tradeDirection[1] === -1,
+    scalpingLongCond: tradeDirection[0] === 0 && tradeDirection[1] === 1,
+    scalpingShortCond: tradeDirection[0] === 0 && tradeDirection[1] === -1,
   };
 };
 
@@ -331,7 +332,7 @@ const rmiCondition = (
 
   let longSignal = rmi[0] < rmiOversold && rmi[1] > rmiOversold;
   let shortSignal = rmi[0] > rmiOverbought && rmi[1] < rmiOverbought;
-  return { rmiLongSignal: longSignal, rmiShortSignal: shortSignal };
+  return { rmiLongCond: longSignal, rmiShortCond: shortSignal };
 };
 
 const bollingerBandsCondition = (
@@ -387,10 +388,12 @@ const bollingerBandsCondition = (
     Math.abs(ao) === 2 &&
     (!sqzFilter || bbSqueeze > sqzThreshold);
 
-  return { bbLongSignal, bbShortSignal };
+  return { bbLongCond: bbLongSignal, bbShortCond: bbShortSignal };
 };
 
 export const isBuySignal = (candles: CandleData[], options?: Options) => {
+  debug('Checking buy signal conditions:');
+
   options = { ...defaultOptions, ...options };
 
   let { adxLongCond } = adxCondition(candles, {
@@ -398,39 +401,56 @@ export const isBuySignal = (candles: CandleData[], options?: Options) => {
     adxLength: options.adxLength,
     adxThreshold: options.adxThreshold,
   });
+  debug(`- ADX long condition: ${adxLongCond}`);
+
   let { psarLongCond } = psarCondition(candles, {
     psarMax: options.psarMax,
     psarStep: options.psarStep,
   });
+  debug(`- PSAR long condition: ${psarLongCond}`);
+
   let { srLongCond, sr, srLongCross, srShortCross } =
     supportResistanceCondition(candles, {
       leftBars: options.supportResistanceLeftBars,
       rightBars: options.supportResistanceRightBars,
     });
+  debug(`- S/R long condition: ${srLongCond}`);
+  debug(`- S/R long cross: ${srLongCross}`);
+
   let volCond = volumeCondition(candles, {
     volumeLength: options.volumeLength,
     volumeMultiplier: options.volumeMultiplier,
   });
+  debug(`- Volume condition: ${volCond}`);
+
   let { rangeFilterLongCond } = rangeFilterCondition(candles, {
     rangeFilterSourceType: options.rangeFilterSourceType,
     rangeFilterMultiplier: options.rangeFilterMultiplier,
     rangeFilterPeriod: options.rangeFilterPeriod,
   });
+  debug(`- Range filter long condition: ${rangeFilterLongCond}`);
+
   let { macdLongCond } = macdCondition(candles, {
     fastLength: options.macdFastLength,
     slowLength: options.macdSlowLength,
     signalLength: options.macdSignalLength,
     sourceType: options.macdSourceType,
   });
+  debug(`- MACD long condition: ${macdLongCond}`);
+
   let { rsiLongCond } = rsiCondition(candles, {
     period: options.rsiLength,
     sourceType: options.rsiSourceType,
   });
+  debug(`- RSI long condition: ${rsiLongCond}`);
+
   let { momentumLongCond } = momentumCondition(candles, {
     length: options.momentumLength,
     smoothLength: options.momentumSmoothLength,
     tmoLength: options.momentumTmoLength,
   });
+  debug(`- Momentum long condition: ${momentumLongCond}`);
+
   let { maLongCond } = maCondition(candles, {
     length: options.maLength,
     sourceType: options.maSourceType,
@@ -439,7 +459,10 @@ export const isBuySignal = (candles: CandleData[], options?: Options) => {
     length: options.jmaLength,
     sourceType: options.jmaSourceType,
   });
-  let { scalpingLongSignal } = scalpingCondition(candles, {
+  debug(`- MA long condition: ${maLongCond}`);
+  debug(`- JMA long condition: ${jmaLongCond}`);
+
+  let { scalpingLongCond } = scalpingCondition(candles, {
     emaScalpingLength: options.emaScalpingLength,
     fastEmaLength: options.scalpingFastEmaLength,
     mediumEmaLength: options.scalpingMediumEmaLength,
@@ -447,18 +470,23 @@ export const isBuySignal = (candles: CandleData[], options?: Options) => {
     lookBack: options.scalpingLookBack,
     useHeikinAshiCandles: options.scalpingUseHeikinAshiCandles,
   });
-  let { rmiLongSignal } = rmiCondition(candles, {
+  debug(`- Scalping long condition: ${scalpingLongCond}`);
+
+  let { rmiLongCond } = rmiCondition(candles, {
     rmiLength: options.rmiLength,
     rmiMomentumLength: options.rmiMomentumLength,
     rmiSourceType: options.rmiSourceType,
     rmiOverbought: options.rmiOverbought,
     rmiOversold: options.rmiOversold,
   });
-  let { bbLongSignal } = bollingerBandsCondition(candles, {
+  debug(`- RMI long condition: ${rmiLongCond}`);
+
+  let { bbLongCond } = bollingerBandsCondition(candles, {
     bollingerBandsLength: options.bollingerBandsLength,
     bollingerBandsMultiplier: options.bollingerBandsMultiplier,
     bollingerBandsSourceType: options.bollingerBandsSourceType,
   });
+  debug(`- Bollinger Bands long condition: ${bbLongCond}`);
 
   let longCondition1 =
     srLongCond &&
@@ -473,7 +501,7 @@ export const isBuySignal = (candles: CandleData[], options?: Options) => {
     volCond;
 
   let longCondition2 =
-    scalpingLongSignal &&
+    scalpingLongCond &&
     adxLongCond &&
     rangeFilterLongCond &&
     macdLongCond &&
@@ -481,24 +509,28 @@ export const isBuySignal = (candles: CandleData[], options?: Options) => {
     momentumLongCond;
 
   let longCondition3 =
-    rmiLongSignal &&
+    rmiLongCond &&
     rangeFilterLongCond &&
     adxLongCond &&
     momentumLongCond &&
     psarLongCond;
 
   let longCondition4 =
-    bbLongSignal &&
+    bbLongCond &&
     rangeFilterLongCond &&
     adxLongCond &&
     momentumLongCond &&
     rsiLongCond &&
     maLongCond;
 
-  return longCondition1 || longCondition2 || longCondition3 || longCondition4;
+  let buySignal = longCondition1 || longCondition2 || longCondition3 || longCondition4;
+  debug(`Final buy signal: ${buySignal}`);
+  return buySignal;
 };
 
 export const isSellSignal = (candles: CandleData[], options?: Options) => {
+  debug('Checking sell signal conditions:');
+
   options = { ...defaultOptions, ...options };
 
   let { adxShortCond } = adxCondition(candles, {
@@ -506,39 +538,56 @@ export const isSellSignal = (candles: CandleData[], options?: Options) => {
     adxLength: options.adxLength,
     adxThreshold: options.adxThreshold,
   });
+  debug(`- ADX short condition: ${adxShortCond}`);
+
   let { psarShortCond } = psarCondition(candles, {
     psarMax: options.psarMax,
     psarStep: options.psarStep,
   });
+  debug(`- PSAR short condition: ${psarShortCond}`);
+
   let { srShortCond, sr, srLongCross, srShortCross } =
     supportResistanceCondition(candles, {
       leftBars: options.supportResistanceLeftBars,
       rightBars: options.supportResistanceRightBars,
     });
+  debug(`- S/R short condition: ${srShortCond}`);
+  debug(`- S/R short cross: ${srShortCross}`);
+
   let volCond = volumeCondition(candles, {
     volumeLength: options.volumeLength,
     volumeMultiplier: options.volumeMultiplier,
   });
+  debug(`- Volume condition: ${volCond}`);
+
   let { rangeFilterShortCond } = rangeFilterCondition(candles, {
     rangeFilterSourceType: options.rangeFilterSourceType,
     rangeFilterMultiplier: options.rangeFilterMultiplier,
     rangeFilterPeriod: options.rangeFilterPeriod,
   });
+  debug(`- Range filter short condition: ${rangeFilterShortCond}`);
+
   let { macdShortCond } = macdCondition(candles, {
     fastLength: options.macdFastLength,
     slowLength: options.macdSlowLength,
     signalLength: options.macdSignalLength,
     sourceType: options.macdSourceType,
   });
+  debug(`- MACD short condition: ${macdShortCond}`);
+
   let { rsiShortCond } = rsiCondition(candles, {
     period: options.rsiLength,
     sourceType: options.rsiSourceType,
   });
+  debug(`- RSI short condition: ${rsiShortCond}`);
+
   let { momentumShortCond } = momentumCondition(candles, {
     length: options.momentumLength,
     smoothLength: options.momentumSmoothLength,
     tmoLength: options.momentumTmoLength,
   });
+  debug(`- Momentum short condition: ${momentumShortCond}`);
+
   let { maShortCond } = maCondition(candles, {
     length: options.maLength,
     sourceType: options.maSourceType,
@@ -547,7 +596,10 @@ export const isSellSignal = (candles: CandleData[], options?: Options) => {
     length: options.jmaLength,
     sourceType: options.jmaSourceType,
   });
-  let { scalpingShortSignal } = scalpingCondition(candles, {
+  debug(`- MA short condition: ${maShortCond}`);
+  debug(`- JMA short condition: ${jmaShortCond}`);
+
+  let { scalpingShortCond } = scalpingCondition(candles, {
     emaScalpingLength: options.emaScalpingLength,
     fastEmaLength: options.scalpingFastEmaLength,
     mediumEmaLength: options.scalpingMediumEmaLength,
@@ -555,18 +607,23 @@ export const isSellSignal = (candles: CandleData[], options?: Options) => {
     lookBack: options.scalpingLookBack,
     useHeikinAshiCandles: options.scalpingUseHeikinAshiCandles,
   });
-  let { rmiShortSignal } = rmiCondition(candles, {
+  debug(`- Scalping short condition: ${scalpingShortCond}`);
+
+  let { rmiShortCond } = rmiCondition(candles, {
     rmiLength: options.rmiLength,
     rmiMomentumLength: options.rmiMomentumLength,
     rmiSourceType: options.rmiSourceType,
     rmiOverbought: options.rmiOverbought,
     rmiOversold: options.rmiOversold,
   });
-  let { bbShortSignal } = bollingerBandsCondition(candles, {
+  debug(`- RMI short condition: ${rmiShortCond}`);
+
+  let { bbShortCond } = bollingerBandsCondition(candles, {
     bollingerBandsLength: options.bollingerBandsLength,
     bollingerBandsMultiplier: options.bollingerBandsMultiplier,
     bollingerBandsSourceType: options.bollingerBandsSourceType,
   });
+  debug(`- Bollinger Bands short condition: ${bbShortCond}`);
 
   let shortCondition1 =
     srShortCond &&
@@ -581,7 +638,7 @@ export const isSellSignal = (candles: CandleData[], options?: Options) => {
     volCond;
 
   let shortCondition2 =
-    scalpingShortSignal &&
+    scalpingShortCond &&
     adxShortCond &&
     rangeFilterShortCond &&
     macdShortCond &&
@@ -589,21 +646,22 @@ export const isSellSignal = (candles: CandleData[], options?: Options) => {
     momentumShortCond;
 
   let shortCondition3 =
-    rmiShortSignal &&
+    rmiShortCond &&
     rangeFilterShortCond &&
     adxShortCond &&
     momentumShortCond &&
     psarShortCond;
 
   let shortCondition4 =
-    bbShortSignal &&
+    bbShortCond &&
     rangeFilterShortCond &&
     adxShortCond &&
     momentumShortCond &&
     rsiShortCond &&
     maShortCond;
 
-  return (
-    shortCondition1 || shortCondition2 || shortCondition3 || shortCondition4
-  );
+  let sellSignal =
+    shortCondition1 || shortCondition2 || shortCondition3 || shortCondition4;
+  debug(`Final sell signal: ${sellSignal}`);
+  return sellSignal;
 };
