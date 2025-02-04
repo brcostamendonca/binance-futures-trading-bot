@@ -1,8 +1,8 @@
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 import { BotConfig } from '../init';
 import { AbstractStrategy, StrategyHyperParameters } from '../init';
 import { BasicBackTestBot } from './bot';
 import { sendTelegramMessage } from '../telegram';
-import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
 import os from 'os';
 
 // Performance tuning constants
@@ -10,55 +10,110 @@ const MEMORY_LIMIT = 0.8; // Use up to 80% of available memory
 const MIN_BATCH_SIZE = 5;
 const MAX_BATCH_SIZE = 50;
 
-// If this is a worker thread, execute the backtest
+// If this is a worker thread, set environment immediately
 if (!isMainThread) {
-  const { parameters, startDate, endDate, initialCapital, strategyName } = workerData;
+  // Set environment variables before any other imports or operations
+  process.env.NODE_ENV = 'worker';
+  process.env.DEBUG = 'false';
 
-  const bot = new BasicBackTestBot(
-    AbstractStrategy(parameters),
-    parameters,
-    strategyName,
-    new Date(startDate),
-    new Date(endDate),
-    initialCapital,
-    false
-  );
+  // Disable console methods except error
+  console.log = () => { };
+  console.info = () => { };
+  console.warn = () => { };
+  console.debug = () => { };
 
-  bot.prepare();
-  bot.run()
-    .then(() => {
-      // Only send essential data back to main thread
-      const { finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
-        totalWinRate, profitFactor, totalNetProfit } = bot.strategyReport;
-      parentPort.postMessage({
-        strategyReport: {
-          finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
-          totalWinRate, profitFactor, totalNetProfit
-        },
-        parameters
-      });
-    })
-    .catch(error => {
-      parentPort.postMessage({ error: error.message });
-    })
-    .finally(() => {
-      // Cleanup
-      if (typeof bot['cleanup'] === 'function') {
-        bot['cleanup']();
-      }
-      // Force garbage collection in worker if available
-      if (global.gc) global.gc();
+  // Create a dummy logger for worker threads
+  const dummyLogger = {
+    debug: () => { },
+    info: () => { },
+    warn: () => { },
+    error: (...args) => console.error(...args),
+    log: () => { }
+  };
+
+  // Monkey patch the global logger
+  global['logger'] = dummyLogger;
+
+  try {
+    const { parameters, startDate, endDate, initialCapital, strategyName } = workerData;
+
+    // Ensure all required parameters are present with default values
+    const defaultParameters = StrategyHyperParameters;
+    const mergedParameters = {};
+
+    // Merge default parameters with optimization parameters
+    Object.entries(defaultParameters).forEach(([key, config]) => {
+      mergedParameters[key] = {
+        value: parameters[key]?.value ?? config.value
+      };
     });
+
+    const bot = new BasicBackTestBot(
+      AbstractStrategy(mergedParameters),
+      mergedParameters,
+      strategyName,
+      new Date(startDate),
+      new Date(endDate),
+      initialCapital,
+      false // Don't generate report in worker threads
+    );
+
+    bot.prepare();
+
+    bot.run()
+      .then(() => {
+        if (!bot.strategyReport) {
+          throw new Error('Strategy report is null after bot run');
+        }
+
+        // Only send essential data back to main thread
+        const { finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
+          totalWinRate, profitFactor, totalNetProfit } = bot.strategyReport;
+
+        parentPort.postMessage({
+          strategyReport: {
+            finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
+            totalWinRate, profitFactor, totalNetProfit
+          },
+          parameters: mergedParameters
+        });
+      })
+      .catch(error => {
+        console.error('Worker Thread Error:', error);
+        console.error('Error stack:', error.stack);
+        parentPort.postMessage({ error: error.message });
+      })
+      .finally(() => {
+        // Cleanup
+        if (typeof bot['cleanup'] === 'function') {
+          bot['cleanup']();
+        }
+        // Force garbage collection in worker if available
+        if (global.gc) global.gc();
+      });
+  } catch (error) {
+    console.error('Worker Thread Setup Error:', error);
+    console.error('Error stack:', error.stack);
+    parentPort.postMessage({ error: error.message });
+  }
 } else {
   // Main thread code
   const startTime = performance.now();
 
   if (process.env.NODE_ENV === 'test') {
+    console.log('Main Thread: Loading configuration');
     const BacktestConfig = BotConfig['backtest'];
     const startDate = new Date(BacktestConfig['start_date']);
     const endDate = new Date(BacktestConfig['end_date']);
     const initialCapital = BacktestConfig['initial_capital'];
     const strategyName = BotConfig['strategy_name'];
+
+    console.log('Main Thread Configuration:', {
+      startDate,
+      endDate,
+      initialCapital,
+      strategyName
+    });
 
     // Dynamic worker count based on system resources
     const cpuCount = os.cpus().length;
@@ -251,9 +306,20 @@ if (!isMainThread) {
 
       async processBatch(combinations: any[]) {
         const batchStartTime = Date.now();
-        const promises = combinations.map(params => this.processTask(params));
-        const results = await Promise.all(promises.map(p => p.catch(e => ({ error: e }))));
+        console.log(`Processing batch of ${combinations.length} combinations`);
+
+        const promises = combinations.map(params => {
+          console.log('Spawning worker for parameters:', Object.keys(params));
+          return this.processTask(params);
+        });
+
+        const results = await Promise.all(promises.map(p => p.catch(e => {
+          console.error('Batch processing error:', e);
+          return { error: e };
+        })));
+
         const validResults = results.filter(r => typeof r === 'object' && r !== null && !('error' in r));
+        console.log(`Batch completed: ${validResults.length} valid results out of ${results.length} total`);
 
         // Adjust batch size based on performance
         this.adjustBatchSize(Date.now() - batchStartTime);
@@ -336,7 +402,7 @@ if (!isMainThread) {
 • Total Trades: ${bestResult.totalTrades}
 • Win Rate: ${bestResult.totalWinRate}%
 • Profit Factor: ${bestResult.profitFactor}
-• Max Drawdown: ${(bestResult.maxRelativeDrawdown * 100).toFixed(2)}%
+• Max Drawdown: ${(bestResult.maxRelativeDrawdown).toFixed(2)}%
 • Total Net Profit: $${bestResult.totalNetProfit.toFixed(2)}
 
 🔧 <b>Optimized Parameters:</b>

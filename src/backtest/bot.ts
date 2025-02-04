@@ -37,25 +37,55 @@ const BacktestConfig = BotConfig['backtest'];
 
 // ====================================================================== //
 
-const bar = new cliProgress.SingleBar(
+// Only create progress bar in main thread
+const bar = process.env.NODE_ENV !== 'worker' ? new cliProgress.SingleBar(
   {
     format:
       'Progress: |' + colors.blue('{bar}') + '| {percentage}% | date: {date}',
   },
   cliProgress.Presets.shades_classic
-);
+) : null;
 
 // ====================================================================== //
 
 // Save the backtest history to the database
-const SAVE_HISTORY = BacktestConfig['save_db'];
+const SAVE_HISTORY = process.env.NODE_ENV === 'worker' ? false : BacktestConfig['save_db'];
 
 // Debug mode with console.log
-export const DEBUG = commandArguments.debug === 'true' ? true : false;
+export const DEBUG = process.env.NODE_ENV === 'worker' ? false : commandArguments.debug === 'true';
 
 // Exchange fee info
 const TAKER_FEES = BotConfig['taker_fees_futures']; // %
 const MAKER_FEES = BotConfig['maker_fees_futures']; // %
+
+// Create no-op logging functions for worker threads
+const noopLogger = {
+  debug: () => { },
+  info: () => { },
+  warn: () => { },
+  error: () => { },
+  log: () => { },
+  debugCandle: () => { },
+  debugOpenOrders: () => { },
+  debugWallet: () => { },
+  printDateBanner: () => { }
+};
+
+// Use appropriate logging functions based on environment
+const logging = process.env.NODE_ENV === 'worker' ? noopLogger : {
+  debugCandle,
+  debugOpenOrders,
+  debugWallet,
+  log,
+  printDateBanner
+};
+
+// Disable console.error in worker threads
+if (process.env.NODE_ENV === 'worker') {
+  console.error = () => { };
+  console.warn = () => { };
+  console.log = () => { };
+}
 
 // ====================================================================== //
 
@@ -246,8 +276,7 @@ export class BasicBackTestBot {
           ) {
             historyError = true;
             console.error(
-              `No candle data has been found on the pair ${
-                asset + base
+              `No candle data has been found on the pair ${asset + base
               } and time frame ${interval} for the period: ${dayjs(
                 this.startDate
               ).format('YYYY-MM-DD HH:mm:ss')} to ${dayjs(this.endDate).format(
@@ -293,7 +322,7 @@ export class BasicBackTestBot {
    * Main function
    */
   public async run() {
-    log(
+    logging.log(
       '====================== 💵 BINANCE TRADING BOT (BACKTEST) 💵 ======================'
     );
 
@@ -341,7 +370,7 @@ export class BasicBackTestBot {
 
     // Time loop
     while (dayjs(currentDate).isSameOrBefore(this.endDate)) {
-      printDateBanner(currentDate);
+      logging.printDateBanner(currentDate);
 
       this.strategyConfigs.forEach((strategyConfig) => {
         const { base, asset, loopInterval, indicatorIntervals } =
@@ -370,7 +399,7 @@ export class BasicBackTestBot {
           const currentCandle = candlesStream[candlesStream.length - 1];
           const currentPrice = currentCandle.close;
 
-          debugCandle(currentCandle);
+          logging.debugCandle(currentCandle);
 
           // Check the current positions
           this.checkPositionMargin(
@@ -408,9 +437,9 @@ export class BasicBackTestBot {
       if (SAVE_HISTORY) this.saveStateToDB(currentDate);
 
       // Debugging
-      debugWallet(this.wallet);
-      debugOpenOrders(this.openOrders);
-      log(''); // \n
+      logging.debugWallet(this.wallet);
+      logging.debugOpenOrders(this.openOrders);
+      logging.log(''); // \n
 
       if (!DEBUG)
         bar.increment(1, {
@@ -837,7 +866,7 @@ export class BasicBackTestBot {
     // Conditions to take or not a position
     const canAddToPosition = allowPyramiding
       ? position.margin + assetBalance * risk <=
-        assetBalance * maxPyramidingAllocation
+      assetBalance * maxPyramidingAllocation
       : false;
     const canTakeLongPosition =
       (canOpenNewPositionToCloseLast && hasShortPosition) ||
@@ -880,7 +909,7 @@ export class BasicBackTestBot {
     ) {
       this.counters[pair].decrement();
       if (this.counters[pair].getValue() == 0) {
-        log(
+        logging.log(
           `The position on ${pair} is longer that the maximum authorized duration. Position has been closed.`
         );
         this.order({
@@ -958,12 +987,12 @@ export class BasicBackTestBot {
       let { takeProfits, stopLoss } =
         !allowPyramiding && exitStrategy
           ? exitStrategy(
-              currentPrice,
-              candles,
-              pricePrecision,
-              OrderSide.BUY,
-              exchangeInfo
-            )
+            currentPrice,
+            candles,
+            pricePrecision,
+            OrderSide.BUY,
+            exchangeInfo
+          )
           : { takeProfits: [], stopLoss: null };
 
       // Calculation of the quantity for the position according to the risk management
@@ -1064,12 +1093,12 @@ export class BasicBackTestBot {
       // Calculate TP and SL
       let { takeProfits, stopLoss } = exitStrategy
         ? exitStrategy(
-            currentPrice,
-            candles,
-            pricePrecision,
-            OrderSide.SELL,
-            exchangeInfo
-          )
+          currentPrice,
+          candles,
+          pricePrecision,
+          OrderSide.SELL,
+          exchangeInfo
+        )
         : { takeProfits: [], stopLoss: null };
 
       // Calculation of the quantity for the position according to the risk management
@@ -1157,7 +1186,7 @@ export class BasicBackTestBot {
     const quantityPrecision = getQuantityPrecision(pair, exchangeInfo);
 
     if (size !== 0 && margin + unrealizedProfit <= 0) {
-      log(`The position on ${pair} has reached the liquidation price.`);
+      logging.log(`The position on ${pair} has reached the liquidation price.`);
       this.order({
         pair,
         price: currentPrice,
@@ -1253,9 +1282,8 @@ export class BasicBackTestBot {
                   null
                 );
 
-                log(
-                  `${
-                    side === 'BUY' ? 'Buy' : 'Sell'
+                logging.log(
+                  `${side === 'BUY' ? 'Buy' : 'Sell'
                   } limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
                   chalk.magenta
                 );
@@ -1324,9 +1352,8 @@ export class BasicBackTestBot {
                 pnl
               );
 
-              log(
-                `${
-                  side === 'BUY' ? 'Buy' : 'Sell'
+              logging.log(
+                `${side === 'BUY' ? 'Buy' : 'Sell'
                 } limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
                 chalk.magenta
               );
@@ -1387,9 +1414,8 @@ export class BasicBackTestBot {
               pnl
             );
 
-            log(
-              `${
-                side === 'BUY' ? 'Buy' : 'Sell'
+            logging.log(
+              `${side === 'BUY' ? 'Buy' : 'Sell'
               } stop order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
               chalk.magenta
             );
@@ -1464,7 +1490,7 @@ export class BasicBackTestBot {
    */
   private closeOpenOrder(orderId: string) {
     this.openOrders = this.openOrders.filter((order) => order.id !== orderId);
-    log(`Close the open order #${orderId}`, chalk.cyan);
+    logging.log(`Close the open order #${orderId}`, chalk.cyan);
   }
 
   /**
@@ -1473,7 +1499,7 @@ export class BasicBackTestBot {
    */
   private closeOpenOrders(pair: string) {
     this.openOrders = this.openOrders.filter((order) => order.pair !== pair);
-    log(`Close all the open orders on the pair ${pair}`, chalk.cyan);
+    logging.log(`Close all the open orders on the pair ${pair}`, chalk.cyan);
   }
 
   /**
@@ -1538,9 +1564,8 @@ export class BasicBackTestBot {
           }
           this.strategyReport.totalFees += fees;
 
-          log(
-            `Take a ${
-              side === 'BUY' ? 'long' : 'short'
+          logging.log(
+            `Take a ${side === 'BUY' ? 'long' : 'short'
             } position on ${pair} with a size of ${quantity} at ${price}. Fees: ${fees}`,
             chalk.green
           );
@@ -1625,9 +1650,8 @@ export class BasicBackTestBot {
           pnl
         );
 
-        log(
-          `Take a ${
-            side === 'BUY' ? 'long' : 'short'
+        logging.log(
+          `Take a ${side === 'BUY' ? 'long' : 'short'
           } position on ${pair} with a size of ${quantity} at ${price}. Fees: ${fees}`,
           chalk.green
         );
