@@ -9,36 +9,36 @@ export const hyperParameters = {
   adxLength: {
     value: 10, // Longer for BTC's volatility
     optimization: [10, 55],
-    optimizationStep: 30  // Reduced range and added step
+    optimizationStep: 15  // Reduced range and added step
   },
   adxThreshold: {
     value: 12, // More sensitive to catch trends early
-    //optimization: [6, 18],
-    //optimizationStep: 6
+    optimization: [6, 18],
+    optimizationStep: 6
   },
 
   // Support/Resistance - Reduced range for faster optimization
   supportResistanceLeftBars: {
     value: 7,  // Balanced for 15m timeframe
-    //optimization: [3, 9],
-    //optimizationStep: 2
+    optimization: [3, 9],
+    optimizationStep: 2
   },
   supportResistanceRightBars: {
     value: 8,  // Slightly more forward-looking
-    //optimization: [5, 14],
-    //optimizationStep: 3
+    optimization: [5, 14],
+    optimizationStep: 3
   },
 
   // Volume Analysis - More focused ranges for strong confirmation
   volumeMultiplier: {
     value: 1.4, // Strong volume confirmation
-    //optimization: [1.0, 2.0],
-    //optimizationStep: 0.1
+    optimization: [1.0, 2.0],
+    optimizationStep: 0.1
   },
   volumeLength: {
     value: 24, // About 6 hours of data on 15m
-    //optimization: [20, 30],
-    //optimizationStep: 2
+    optimization: [20, 30],
+    optimizationStep: 2
   },
 
   // PSAR for Trend Direction - Smaller ranges for critical parameters
