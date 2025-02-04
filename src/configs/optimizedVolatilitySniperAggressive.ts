@@ -19,9 +19,9 @@ export const hyperParameters = {
 
   // Support/Resistance - Reduced range for faster optimization
   supportResistanceLeftBars: {
-    value: 7,  // Balanced for 15m timeframe
+    value: 6,  // Balanced for 15m timeframe
     optimization: [3, 9],
-    optimizationStep: 2
+    optimizationStep: 3
   },
   supportResistanceRightBars: {
     value: 8,  // Slightly more forward-looking
@@ -31,14 +31,14 @@ export const hyperParameters = {
 
   // Volume Analysis - More focused ranges for strong confirmation
   volumeMultiplier: {
-    value: 1.4, // Strong volume confirmation
+    value: 1.5, // Strong volume confirmation
     optimization: [1.0, 2.0],
-    optimizationStep: 0.1
+    optimizationStep: 0.5
   },
   volumeLength: {
-    value: 24, // About 6 hours of data on 15m
+    value: 25, // About 6 hours of data on 15m
     optimization: [20, 30],
-    optimizationStep: 2
+    optimizationStep: 5
   },
 
   // PSAR for Trend Direction - Smaller ranges for critical parameters
@@ -194,18 +194,18 @@ export const hyperParameters = {
   // Risk Management - Focused ranges for critical parameters
   tpLongPercent: {
     value: 0.02, // 2% first target
-    //optimization: [0.015, 0.025],
-    //optimizationStep: 0.001
+    optimization: [0.01, 0.04],
+    optimizationStep: 0.01
   },
   tpShortPercent: {
     value: 0.02, // 2% first target
-    //optimization: [0.015, 0.025],
-    //optimizationStep: 0.001
+    optimization: [0.01, 0.04],
+    optimizationStep: 0.01
   },
   slPercent: {
     value: 0.01, // 1% stop loss for better R:R
-    //optimization: [0.008, 0.015],
-    //optimizationStep: 0.001
+    optimization: [0.005, 0.02],
+    optimizationStep: 0.005
   },
 };
 
