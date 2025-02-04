@@ -306,10 +306,15 @@ if (!isMainThread) {
 
       async processBatch(combinations: any[]) {
         const batchStartTime = Date.now();
-        console.log(`Processing batch of ${combinations.length} combinations`);
+        console.log(`\nProcessing batch of ${combinations.length} combinations`);
 
         const promises = combinations.map(params => {
-          console.log('Spawning worker for parameters:', Object.keys(params));
+          // Log the actual parameter values
+          const parameterInfo = Object.entries(params)
+            .map(([key, value]: [string, any]) => `${key}: ${value.value}`)
+            .join(', ');
+          console.log(`Spawning worker with parameters: ${parameterInfo}`);
+
           return this.processTask(params);
         });
 
@@ -319,10 +324,11 @@ if (!isMainThread) {
         })));
 
         const validResults = results.filter(r => typeof r === 'object' && r !== null && !('error' in r));
-        console.log(`Batch completed: ${validResults.length} valid results out of ${results.length} total`);
+        const batchDuration = Date.now() - batchStartTime;
+        console.log(`\nBatch completed in ${(batchDuration / 1000).toFixed(1)}s: ${validResults.length} valid results out of ${results.length} total`);
 
         // Adjust batch size based on performance
-        this.adjustBatchSize(Date.now() - batchStartTime);
+        this.adjustBatchSize(batchDuration);
 
         return validResults;
       }
@@ -367,14 +373,22 @@ if (!isMainThread) {
             const roi = ((strategyReport.finalCapital - strategyReport.initialCapital) / strategyReport.initialCapital * 100);
             console.log('\n=== New Best Strategy Found ===');
             console.log(`ROI: ${roi.toFixed(2)}%, Max Drawdown: ${(strategyReport.maxRelativeDrawdown * 100).toFixed(2)}%`);
+            console.log('Parameters:', Object.entries(parameters)
+              .map(([key, value]: [string, any]) => `${key}: ${value.value}`)
+              .join(', '));
           }
         });
 
         processedCount += batch.length;
         const progress = (processedCount / totalCombinationsCount) * 100;
         const poolStats = workerPool.getStats();
+        const timePerBatch = poolStats.lastBatchDuration / 1000; // Convert to seconds
+        const remainingBatches = Math.ceil((totalCombinationsCount - processedCount) / BATCH_SIZE);
+        const estimatedTimeRemaining = timePerBatch * remainingBatches;
+
         console.log(`\nProgress: ${processedCount}/${totalCombinationsCount} (${progress.toFixed(1)}%)`);
-        console.log(`Batch Duration: ${poolStats.lastBatchDuration}ms, Active Workers: ${poolStats.activeWorkers}`);
+        console.log(`Batch Duration: ${(poolStats.lastBatchDuration / 1000).toFixed(1)}s, Active Workers: ${poolStats.activeWorkers}`);
+        console.log(`Estimated time remaining: ${estimatedTimeRemaining.toFixed(0)}s`);
 
         if (global.gc) global.gc();
       }
