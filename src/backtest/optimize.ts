@@ -1,253 +1,364 @@
 import { BotConfig } from '../init';
 import { AbstractStrategy, StrategyHyperParameters } from '../init';
 import { BasicBackTestBot } from './bot';
+import { sendTelegramMessage } from '../telegram';
+import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+import os from 'os';
 
-var startTime = performance.now();
+// Performance tuning constants
+const MEMORY_LIMIT = 0.8; // Use up to 80% of available memory
+const MIN_BATCH_SIZE = 5;
+const MAX_BATCH_SIZE = 50;
 
-if (process.env.NODE_ENV === 'test') {
-  const BacktestConfig = BotConfig['backtest'];
-  const startDate = new Date(BacktestConfig['start_date']);
-  const endDate = new Date(BacktestConfig['end_date']);
-  const initialCapital = BacktestConfig['initial_capital'];
-  const strategyName = BotConfig['strategy_name'];
-  const BATCH_SIZE = 10; // Number of combinations to run at once
+// If this is a worker thread, execute the backtest
+if (!isMainThread) {
+  const { parameters, startDate, endDate, initialCapital, strategyName } = workerData;
 
-  // Debug the parameters we're optimizing
-  console.log('\n=== Parameters to Optimize ===');
-  Object.entries(StrategyHyperParameters).forEach(([name, config]) => {
-    if (config.optimization && config.optimization.length > 0) {
-      console.log(`${name}:`, {
-        current: config.value,
-        optimization: config.optimization,
-        step: config.optimizationStep
-      });
-    }
-  });
-
-  function run(parameters: HyperParameters) {
-    const bot = new BasicBackTestBot(
-      AbstractStrategy(parameters),
-      parameters,
-      strategyName,
-      startDate,
-      endDate,
-      initialCapital,
-      false
-    );
-    bot.prepare();
-    return new Promise<[StrategyReport, HyperParameters]>((resolve, reject) => {
-      bot
-        .run()
-        .then(() => {
-          let parametersString =
-            '[ ' +
-            Object.entries(parameters)
-              .map(
-                ([parameterName, config]) => `${parameterName}: ${config.value}`
-              )
-              .join(', ') +
-            ' ]';
-          console.log(`\nCompleted run with parameters: ${parametersString}`);
-          console.log(`Final Capital: ${bot.strategyReport.finalCapital}, ROI: ${((bot.strategyReport.finalCapital - bot.strategyReport.initialCapital) / bot.strategyReport.initialCapital * 100).toFixed(2)}%, Max Drawdown: ${(bot.strategyReport.maxRelativeDrawdown * 100).toFixed(2)}%`);
-          resolve([bot.strategyReport, parameters]);
-        })
-        .catch(reject);
-    });
-  }
-
-  // ========================================================================================== //
-
-  let parameterNames = Object.keys(StrategyHyperParameters).map((name) => name);
-  let parameterValues = Object.values(StrategyHyperParameters).map(
-    ({ optimization, optimizationStep, value }) => {
-      if (optimization && optimization.length > 0) {
-        // Handle array of specific values
-        if (Array.isArray(optimization) && optimization.length > 1) {
-          // Handle numeric range
-          if (
-            typeof optimization[0] === 'number' &&
-            typeof optimization[1] === 'number' &&
-            optimization.length === 2 &&
-            optimization[0] < optimization[1]
-          ) {
-            let values = [];
-            let [min, max] = optimization;
-            let step = optimizationStep || 1;
-            for (let i = min; i <= max; i += step) {
-              values.push(i);
-            }
-            return values;
-          }
-          // Handle boolean values
-          else if (
-            Array.isArray(optimization) &&
-            optimization.length > 0 &&
-            (optimization as unknown[]).every(val => typeof val === 'boolean')
-          ) {
-            return (optimization as unknown) as boolean[];
-          }
-          // Handle string values
-          else if (
-            Array.isArray(optimization) &&
-            optimization.length > 0 &&
-            (optimization as unknown[]).every(val => typeof val === 'string')
-          ) {
-            return (optimization as unknown) as string[];
-          }
-          // Return array as is for specific values
-          return optimization;
-        }
-      }
-      // If no optimization array, return empty array
-      return [];
-    }
+  const bot = new BasicBackTestBot(
+    AbstractStrategy(parameters),
+    parameters,
+    strategyName,
+    new Date(startDate),
+    new Date(endDate),
+    initialCapital,
+    false
   );
 
-  // Debug the parameter values we'll be testing
-  console.log('\n=== Parameter Values for Testing ===');
-  parameterNames.forEach((name, index) => {
-    if (parameterValues[index].length > 0) {
-      console.log(`${name}:`, parameterValues[index]);
-    }
-  });
+  bot.prepare();
+  bot.run()
+    .then(() => {
+      // Only send essential data back to main thread
+      const { finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
+        totalWinRate, profitFactor, totalNetProfit } = bot.strategyReport;
+      parentPort.postMessage({
+        strategyReport: {
+          finalCapital, initialCapital, maxRelativeDrawdown, totalTrades,
+          totalWinRate, profitFactor, totalNetProfit
+        },
+        parameters
+      });
+    })
+    .catch(error => {
+      parentPort.postMessage({ error: error.message });
+    })
+    .finally(() => {
+      // Cleanup
+      if (typeof bot['cleanup'] === 'function') {
+        bot['cleanup']();
+      }
+      // Force garbage collection in worker if available
+      if (global.gc) global.gc();
+    });
+} else {
+  // Main thread code
+  const startTime = performance.now();
 
-  // ========================================================================================== //
+  if (process.env.NODE_ENV === 'test') {
+    const BacktestConfig = BotConfig['backtest'];
+    const startDate = new Date(BacktestConfig['start_date']);
+    const endDate = new Date(BacktestConfig['end_date']);
+    const initialCapital = BacktestConfig['initial_capital'];
+    const strategyName = BotConfig['strategy_name'];
 
-  let indexToOptimize: number[] = [];
+    // Dynamic worker count based on system resources
+    const cpuCount = os.cpus().length;
+    const MAX_WORKERS = Math.max(1, Math.min(cpuCount - 1, Math.floor(cpuCount * 0.8)));
 
-  // Find the parameters index to optimize
-  for (let i = 0; i < parameterValues.length; i++) {
-    if (parameterValues[i].length > 0) indexToOptimize.push(i);
-  }
+    // Auto-tune batch size based on available memory
+    const freeMem = os.freemem();
+    const totalMem = os.totalmem();
+    const memoryBasedBatchSize = Math.floor((freeMem / totalMem) * MAX_BATCH_SIZE);
+    const BATCH_SIZE = Math.max(MIN_BATCH_SIZE, Math.min(memoryBasedBatchSize, MAX_BATCH_SIZE));
 
-  console.log('\n=== Parameters to Optimize (Indices) ===');
-  indexToOptimize.forEach(index => {
-    console.log(`${parameterNames[index]}: ${parameterValues[index].length} values`);
-  });
-
-  function* parameterCombinationsGenerator(i: number, parameters: HyperParameters): Generator<HyperParameters> {
-    let currentIndexToOptimize = indexToOptimize[i];
-
-    if (i >= indexToOptimize.length) {
-      yield { ...parameters };
-      return;
-    }
-
-    for (let n = 0; n < parameterValues[currentIndexToOptimize].length; n++) {
-      let newParams = { ...parameters };
-      newParams[parameterNames[currentIndexToOptimize]] = {
-        value: parameterValues[currentIndexToOptimize][n],
-      };
-      yield* parameterCombinationsGenerator(i + 1, newParams);
-    }
-  }
-
-  // ========================================================================================== //
-
-  /**
-   * Return true if a is better than b, else false
-   */
-  function compareStrategyReport(a: StrategyReport, b: StrategyReport) {
-    const roi = (r: StrategyReport) =>
-      (r.finalCapital - r.initialCapital) / r.initialCapital;
-
-    const getScore = (r: StrategyReport) => {
-      const roiValue = roi(r);
-      const drawdown = Math.abs(r.maxRelativeDrawdown);
-      // Avoid division by zero and penalize high drawdowns
-      return drawdown === 0 ? roiValue : roiValue / drawdown;
-    };
-
-    const scoreA = getScore(a);
-    const scoreB = getScore(b);
-
-    console.log(`\nComparing strategies:
-    Strategy A - ROI: ${(roi(a) * 100).toFixed(2)}%, Drawdown: ${(a.maxRelativeDrawdown * 100).toFixed(2)}%, Score: ${scoreA.toFixed(4)}
-    Strategy B - ROI: ${(roi(b) * 100).toFixed(2)}%, Drawdown: ${(b.maxRelativeDrawdown * 100).toFixed(2)}%, Score: ${scoreB.toFixed(4)}`);
-
-    return scoreA > scoreB;
-  }
-
-  let bestResultParameters: HyperParameters = {};
-  let bestResultStrategyReport: StrategyReport = null;
-  let totalCombinations = 0;
-  let processedCombinations = 0;
-
-  async function processBatch(combinations: HyperParameters[]) {
-    const promises = combinations.map(parameters => run(parameters));
-    const results = await Promise.all(promises);
-    processedCombinations += combinations.length;
-
-    results.forEach(([strategyReport, hyperParameters]) => {
-      if (
-        (Object.keys(bestResultParameters).length === 0 &&
-          bestResultStrategyReport === null) ||
-        compareStrategyReport(strategyReport, bestResultStrategyReport)
-      ) {
-        console.log('\n=== New Best Strategy Found ===');
-        console.log('Parameters:', JSON.stringify(hyperParameters, null, 2));
-        console.log(`ROI: ${((strategyReport.finalCapital - strategyReport.initialCapital) / strategyReport.initialCapital * 100).toFixed(2)}%`);
-        console.log(`Max Drawdown: ${(strategyReport.maxRelativeDrawdown * 100).toFixed(2)}%`);
-        bestResultParameters = { ...hyperParameters };  // Make a copy to ensure we don't modify it
-        bestResultStrategyReport = { ...strategyReport };  // Make a copy to ensure we don't modify it
+    // Debug the parameters we're optimizing
+    console.log('\n=== Parameters to Optimize ===');
+    const parametersToOptimize = new Map();
+    Object.entries(StrategyHyperParameters).forEach(([name, config]) => {
+      if (config.optimization?.length > 0) {
+        parametersToOptimize.set(name, {
+          current: config.value,
+          optimization: config.optimization,
+          step: config.optimizationStep
+        });
+        console.log(`${name}:`, {
+          current: config.value,
+          optimization: config.optimization,
+          step: config.optimizationStep
+        });
       }
     });
-  }
 
-  async function optimizeInBatches() {
-    const generator = parameterCombinationsGenerator(0, { ...StrategyHyperParameters });
-    let currentBatch: HyperParameters[] = [];
-    let batchCount = 0;
+    // Efficient parameter value generation with memoization
+    const parameterValueCache = new Map();
+    function generateParameterValues(config: any) {
+      const cacheKey = JSON.stringify(config);
+      if (parameterValueCache.has(cacheKey)) {
+        return parameterValueCache.get(cacheKey);
+      }
 
-    // Count total combinations first
-    for (const _ of parameterCombinationsGenerator(0, { ...StrategyHyperParameters })) {
-      totalCombinations++;
-    }
-    console.log(`\nTotal combinations to test: ${totalCombinations}`);
+      const { optimization, step } = config;
+      if (!optimization?.length) return [];
 
-    for (const combination of generator) {
-      currentBatch.push({ ...combination });  // Make a copy to ensure we don't modify the original
+      let result;
+      if (optimization.length === 2 &&
+        typeof optimization[0] === 'number' &&
+        typeof optimization[1] === 'number') {
+        const [min, max] = optimization;
+        const stepSize = step || 1;
 
-      if (currentBatch.length >= BATCH_SIZE) {
-        batchCount++;
-        console.log(`\nProcessing batch ${batchCount}... (${processedCombinations + 1}-${processedCombinations + currentBatch.length} of ${totalCombinations})`);
-        await processBatch(currentBatch);
-        currentBatch = [];
+        // Calculate exact number of steps
+        const numSteps = Math.floor((max - min) / stepSize) + 1;
+        const values = [];
 
-        // Force garbage collection if available
-        if (global.gc) {
-          global.gc();
+        // Generate values with exact step count
+        for (let i = 0; i < numSteps; i++) {
+          // Ensure we don't exceed max due to floating point errors
+          const value = Number(Math.min(min + i * stepSize, max).toFixed(10));
+          values.push(value);
         }
+
+        // Ensure max value is included if it wasn't due to rounding
+        if (values[values.length - 1] < max) {
+          values.push(Number(max.toFixed(10)));
+        }
+
+        result = values;
+
+        // Debug output for verification
+        console.log(`Range [${min}, ${max}] with step ${stepSize} generated ${values.length} values:`, values);
+      } else {
+        result = optimization;
+      }
+
+      parameterValueCache.set(cacheKey, result);
+      return result;
+    }
+
+    // Generate parameter combinations more efficiently with iterator
+    function* generateCombinations(parameters: Map<string, any>): Generator<any> {
+      const entries = Array.from(parameters.entries());
+      const values = entries.map(([name, config]) => {
+        const vals = generateParameterValues({
+          optimization: config.optimization,
+          step: config.step
+        });
+        return vals;
+      });
+
+      // Debug: Print the number of values for each parameter
+      console.log('\nParameter value counts:');
+      entries.forEach(([name], index) => {
+        console.log(`${name}: ${values[index].length} values (${values[index].join(', ')})`);
+      });
+
+      const totalCombinations = values.reduce((acc, arr) => acc * arr.length, 1);
+
+      for (let i = 0; i < totalCombinations; i++) {
+        const combination = {};
+        let temp = i;
+        for (let j = values.length - 1; j >= 0; j--) {
+          const size = values[j].length;
+          const index = temp % size;
+          combination[entries[j][0]] = { value: values[j][index] };
+          temp = Math.floor(temp / size);
+        }
+        yield combination;
       }
     }
 
-    // Process remaining combinations
-    if (currentBatch.length > 0) {
-      batchCount++;
-      console.log(`\nProcessing final batch ${batchCount}... (${processedCombinations + 1}-${totalCombinations} of ${totalCombinations})`);
-      await processBatch(currentBatch);
+    // Optimized comparison function with early exit
+    function compareStrategyReport(a: StrategyReport, b: StrategyReport) {
+      const roiA = (a.finalCapital - a.initialCapital) / a.initialCapital;
+      const roiB = (b.finalCapital - b.initialCapital) / b.initialCapital;
+
+      // Quick ROI comparison first
+      if (roiA > roiB * 1.5) return true;
+      if (roiB > roiA * 1.5) return false;
+
+      const drawdownA = Math.abs(a.maxRelativeDrawdown);
+      const drawdownB = Math.abs(b.maxRelativeDrawdown);
+
+      const scoreA = drawdownA === 0 ? roiA : roiA / drawdownA;
+      const scoreB = drawdownB === 0 ? roiB : roiB / drawdownB;
+
+      return scoreA > scoreB;
     }
 
-    console.log(
-      '\n================== Final Optimized Parameters =================='
-    );
-    console.log(JSON.stringify(bestResultParameters, null, 2));
-    console.log(
-      '\n================== Final Strategy Report =================='
-    );
-    console.log(JSON.stringify(bestResultStrategyReport, null, 2));
+    // Enhanced worker pool with auto-scaling
+    class WorkerPool {
+      private workers: Worker[] = [];
+      private activeWorkers = 0;
+      private lastBatchDuration = 0;
+      private readonly startTime: number;
 
-    var endTime = performance.now();
-    console.log(
-      `\nOptimization completed in ${((endTime - startTime) / 1000).toFixed(2)} seconds`
-    );
-    console.log(`Tested ${totalCombinations} combinations`);
-    if (bestResultStrategyReport) {
-      console.log(`Best ROI: ${((bestResultStrategyReport.finalCapital - bestResultStrategyReport.initialCapital) / bestResultStrategyReport.initialCapital * 100).toFixed(2)}%`);
-      console.log(`Best Max Drawdown: ${(bestResultStrategyReport.maxRelativeDrawdown * 100).toFixed(2)}%`);
+      constructor(private maxWorkers: number) {
+        this.startTime = Date.now();
+      }
+
+      private adjustBatchSize(duration: number) {
+        this.lastBatchDuration = duration;
+        // Auto-adjust batch size based on duration and memory usage
+        const memUsage = process.memoryUsage().heapUsed / process.memoryUsage().heapTotal;
+        if (duration > 30000 && memUsage < MEMORY_LIMIT) {
+          return Math.max(MIN_BATCH_SIZE, BATCH_SIZE * 0.8);
+        } else if (duration < 10000 && memUsage < MEMORY_LIMIT * 0.7) {
+          return Math.min(MAX_BATCH_SIZE, BATCH_SIZE * 1.2);
+        }
+        return BATCH_SIZE;
+      }
+
+      async processTask(parameters: any) {
+        return new Promise((resolve, reject) => {
+          const worker = new Worker(__filename, {
+            workerData: {
+              parameters,
+              startDate,
+              endDate,
+              initialCapital,
+              strategyName
+            }
+          });
+
+          const timeout = setTimeout(() => {
+            worker.terminate();
+            reject(new Error('Worker timeout'));
+          }, 300000); // 5 minute timeout
+
+          worker.on('message', (result) => {
+            clearTimeout(timeout);
+            if (result.error) {
+              reject(result.error);
+            } else {
+              resolve(result);
+            }
+            this.activeWorkers--;
+            worker.terminate();
+          });
+
+          worker.on('error', (error) => {
+            clearTimeout(timeout);
+            reject(error);
+          });
+
+          worker.on('exit', (code) => {
+            clearTimeout(timeout);
+            if (code !== 0) reject(new Error(`Worker stopped with exit code ${code}`));
+          });
+
+          this.activeWorkers++;
+        });
+      }
+
+      async processBatch(combinations: any[]) {
+        const batchStartTime = Date.now();
+        const promises = combinations.map(params => this.processTask(params));
+        const results = await Promise.all(promises.map(p => p.catch(e => ({ error: e }))));
+        const validResults = results.filter(r => typeof r === 'object' && r !== null && !('error' in r));
+
+        // Adjust batch size based on performance
+        this.adjustBatchSize(Date.now() - batchStartTime);
+
+        return validResults;
+      }
+
+      cleanup() {
+        this.workers.forEach(worker => worker.terminate());
+        this.workers = [];
+      }
+
+      getStats() {
+        return {
+          activeWorkers: this.activeWorkers,
+          lastBatchDuration: this.lastBatchDuration,
+          uptime: Date.now() - this.startTime
+        };
+      }
     }
+
+    // Main optimization function
+    async function optimize() {
+      const workerPool = new WorkerPool(MAX_WORKERS);
+      let bestResult = null;
+      let bestParameters = null;
+      let processedCount = 0;
+
+      // Pre-generate all combinations for accurate count
+      const combinations = Array.from(generateCombinations(parametersToOptimize));
+      const totalCombinationsCount = combinations.length;
+
+      console.log(`\nTotal combinations to test: ${totalCombinationsCount}`);
+      console.log(`Using ${MAX_WORKERS} worker threads with batch size ${BATCH_SIZE}`);
+
+      for (let i = 0; i < combinations.length; i += BATCH_SIZE) {
+        const batch = combinations.slice(i, i + BATCH_SIZE);
+        const results = await workerPool.processBatch(batch);
+
+        results.forEach((result: any) => {
+          const { strategyReport, parameters } = result;
+          if (!bestResult || compareStrategyReport(strategyReport, bestResult)) {
+            bestResult = strategyReport;
+            bestParameters = parameters;
+            const roi = ((strategyReport.finalCapital - strategyReport.initialCapital) / strategyReport.initialCapital * 100);
+            console.log('\n=== New Best Strategy Found ===');
+            console.log(`ROI: ${roi.toFixed(2)}%, Max Drawdown: ${(strategyReport.maxRelativeDrawdown * 100).toFixed(2)}%`);
+          }
+        });
+
+        processedCount += batch.length;
+        const progress = (processedCount / totalCombinationsCount) * 100;
+        const poolStats = workerPool.getStats();
+        console.log(`\nProgress: ${processedCount}/${totalCombinationsCount} (${progress.toFixed(1)}%)`);
+        console.log(`Batch Duration: ${poolStats.lastBatchDuration}ms, Active Workers: ${poolStats.activeWorkers}`);
+
+        if (global.gc) global.gc();
+      }
+
+      workerPool.cleanup();
+      return { bestResult, bestParameters, totalCombinationsCount };
+    }
+
+    // Start optimization
+    optimize()
+      .then(async ({ bestResult, bestParameters, totalCombinationsCount }) => {
+        const endTime = performance.now();
+        const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+        const reportMessage = `
+🤖 <b>Optimization Results for ${strategyName}</b>
+
+⏱️ Duration: ${duration} seconds
+🔄 Total Combinations: ${totalCombinationsCount}
+
+📊 <b>Best Strategy Results:</b>
+• Initial Capital: $${bestResult.initialCapital.toFixed(2)}
+• Final Capital: $${bestResult.finalCapital.toFixed(2)}
+• ROI: ${((bestResult.finalCapital - bestResult.initialCapital) / bestResult.initialCapital * 100).toFixed(2)}%
+• Total Trades: ${bestResult.totalTrades}
+• Win Rate: ${bestResult.totalWinRate}%
+• Profit Factor: ${bestResult.profitFactor}
+• Max Drawdown: ${(bestResult.maxRelativeDrawdown * 100).toFixed(2)}%
+• Total Net Profit: $${bestResult.totalNetProfit.toFixed(2)}
+
+🔧 <b>Optimized Parameters:</b>
+${Object.entries(bestParameters)
+            .map(([key, value]: [string, any]) => `• ${key}: ${value.value}`)
+            .join('\n')}`;
+
+        try {
+          const originalEnv = process.env.NODE_ENV;
+          process.env.NODE_ENV = 'production';
+          await sendTelegramMessage(reportMessage);
+          process.env.NODE_ENV = originalEnv;
+        } catch (error) {
+          console.error('Failed to send results to Telegram:', error);
+        }
+
+        console.log('\n================== Optimization Complete ==================');
+        console.log(`Duration: ${duration} seconds`);
+        console.log('Best Parameters:', JSON.stringify(bestParameters, null, 2));
+        console.log('Best Results:', JSON.stringify(bestResult, null, 2));
+      })
+      .catch(console.error);
   }
-
-  // Start the optimization process
-  optimizeInBatches().catch(console.error);
 }
+
