@@ -59,8 +59,8 @@ async function trainModel() {
     await loadCandlesFromCSV(
       'BTCUSDT',
       CandleChartInterval.ONE_HOUR,
-      '2020-01-01 00:00:00',
-      '2022-01-01 00:00:00'
+      '2023-01-01 00:00:00',
+      '2025-01-01 00:00:00'
     )
   ).map((c) => c.close);
 

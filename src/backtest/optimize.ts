@@ -277,26 +277,10 @@ ${Object.entries(bestResultParameters)
 
       // Send the report via Telegram and wait for it to complete
       console.log('\nSending results to Telegram...');
-      await sendTelegramMessage(reportMessage).catch(error => {
+      /*await sendTelegramMessage(reportMessage).catch(error => {
         console.error('Error sending Telegram message:', error);
-        // Try sending a shorter version if the original message is too long
-        const shortReport = `
-🤖 <b>Optimization Results for ${strategyName}</b>
-
-📊 <b>Best Results:</b>
-• ROI: ${((bestResultStrategyReport.finalCapital - bestResultStrategyReport.initialCapital) / bestResultStrategyReport.initialCapital * 100).toFixed(2)}%
-• Final Capital: $${bestResultStrategyReport.finalCapital.toFixed(2)}
-• Win Rate: ${bestResultStrategyReport.totalWinRate}%
-• Max Drawdown: ${(bestResultStrategyReport.maxRelativeDrawdown * 100).toFixed(2)}%
-• Total Trades: ${bestResultStrategyReport.totalTrades}
-
-🔧 <b>Best Parameters:</b>
-${Object.entries(bestResultParameters)
-            .map(([key, value]) => `• ${key}: ${value.value}`)
-            .join('\n')}`;
-        return sendTelegramMessage(shortReport);
       });
-      console.log('Results sent to Telegram successfully!');
+      console.log('Results sent to Telegram successfully!');*/
 
       // Restore original NODE_ENV
       process.env.NODE_ENV = originalEnv;
