@@ -1,6 +1,7 @@
 import { BotConfig } from '../init';
 import { AbstractStrategy, StrategyHyperParameters } from '../init';
 import { BasicBackTestBot } from './bot';
+import { sendTelegramMessage } from '../telegram';
 
 var startTime = performance.now();
 
@@ -228,6 +229,82 @@ if (process.env.NODE_ENV === 'test') {
       await processBatch(currentBatch);
     }
 
+    const endTime = performance.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+
+    // Create a detailed report message
+    const reportMessage = `
+🤖 <b>Optimization Results for ${strategyName}</b>
+
+⏱️ Duration: ${duration} seconds
+🔄 Total Combinations: ${totalCombinations}
+
+📊 <b>Best Strategy Results:</b>
+• Initial Capital: $${bestResultStrategyReport.initialCapital.toFixed(2)}
+• Final Capital: $${bestResultStrategyReport.finalCapital.toFixed(2)}
+• ROI: ${((bestResultStrategyReport.finalCapital - bestResultStrategyReport.initialCapital) / bestResultStrategyReport.initialCapital * 100).toFixed(2)}%
+• Total Trades: ${bestResultStrategyReport.totalTrades}
+• Win Rate: ${bestResultStrategyReport.totalWinRate}%
+• Profit Factor: ${bestResultStrategyReport.profitFactor}
+• Max Drawdown: ${(bestResultStrategyReport.maxRelativeDrawdown * 100).toFixed(2)}%
+• Total Net Profit: $${bestResultStrategyReport.totalNetProfit.toFixed(2)}
+
+💰 <b>Trade Statistics:</b>
+• Total Profit: $${bestResultStrategyReport.totalProfit.toFixed(2)}
+• Total Loss: $${bestResultStrategyReport.totalLoss.toFixed(2)}
+• Max Profit Trade: $${bestResultStrategyReport.maxProfit.toFixed(2)}
+• Max Loss Trade: $${bestResultStrategyReport.maxLoss.toFixed(2)}
+• Avg Profit: $${bestResultStrategyReport.avgProfit?.toFixed(2) || 0}
+• Avg Loss: $${bestResultStrategyReport.avgLoss?.toFixed(2) || 0}
+
+📈 <b>Trade Details:</b>
+• Long Trades: ${bestResultStrategyReport.totalLongTrades} (Win: ${bestResultStrategyReport.longWinRate}%)
+• Short Trades: ${bestResultStrategyReport.totalShortTrades} (Win: ${bestResultStrategyReport.shortWinRate}%)
+• Consecutive Wins: ${bestResultStrategyReport.maxConsecutiveWinsCount}
+• Consecutive Losses: ${bestResultStrategyReport.maxConsecutiveLossesCount}
+
+🔧 <b>Optimized Parameters:</b>
+${Object.entries(bestResultParameters)
+        .map(([key, value]) => `• ${key}: ${value.value}`)
+        .join('\n')}
+
+⏰ Test Period: ${bestResultStrategyReport.testPeriod}`;
+
+    try {
+      // Temporarily set NODE_ENV to production to prevent message deletion
+      const originalEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+
+      // Send the report via Telegram and wait for it to complete
+      console.log('\nSending results to Telegram...');
+      await sendTelegramMessage(reportMessage).catch(error => {
+        console.error('Error sending Telegram message:', error);
+        // Try sending a shorter version if the original message is too long
+        const shortReport = `
+🤖 <b>Optimization Results for ${strategyName}</b>
+
+📊 <b>Best Results:</b>
+• ROI: ${((bestResultStrategyReport.finalCapital - bestResultStrategyReport.initialCapital) / bestResultStrategyReport.initialCapital * 100).toFixed(2)}%
+• Final Capital: $${bestResultStrategyReport.finalCapital.toFixed(2)}
+• Win Rate: ${bestResultStrategyReport.totalWinRate}%
+• Max Drawdown: ${(bestResultStrategyReport.maxRelativeDrawdown * 100).toFixed(2)}%
+• Total Trades: ${bestResultStrategyReport.totalTrades}
+
+🔧 <b>Best Parameters:</b>
+${Object.entries(bestResultParameters)
+            .map(([key, value]) => `• ${key}: ${value.value}`)
+            .join('\n')}`;
+        return sendTelegramMessage(shortReport);
+      });
+      console.log('Results sent to Telegram successfully!');
+
+      // Restore original NODE_ENV
+      process.env.NODE_ENV = originalEnv;
+    } catch (error) {
+      console.error('Failed to send results to Telegram:', error);
+    }
+
+    // Console output
     console.log(
       '\n================== Final Optimized Parameters =================='
     );
@@ -237,9 +314,8 @@ if (process.env.NODE_ENV === 'test') {
     );
     console.log(JSON.stringify(bestResultStrategyReport, null, 2));
 
-    var endTime = performance.now();
     console.log(
-      `\nOptimization completed in ${((endTime - startTime) / 1000).toFixed(2)} seconds`
+      `\nOptimization completed in ${duration} seconds`
     );
     console.log(`Tested ${totalCombinations} combinations`);
     if (bestResultStrategyReport) {
@@ -251,3 +327,4 @@ if (process.env.NODE_ENV === 'test') {
   // Start the optimization process
   optimizeInBatches().catch(console.error);
 }
+
