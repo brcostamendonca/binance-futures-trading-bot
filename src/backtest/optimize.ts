@@ -96,7 +96,7 @@ if (!isMainThread) {
         return parameterValueCache.get(cacheKey);
       }
 
-      const { optimization, optimizationStep } = config;
+      const { optimization, step } = config;
       if (!optimization?.length) return [];
 
       let result;
@@ -104,11 +104,28 @@ if (!isMainThread) {
         typeof optimization[0] === 'number' &&
         typeof optimization[1] === 'number') {
         const [min, max] = optimization;
-        const step = optimizationStep || 1;
-        result = Array.from(
-          { length: Math.floor((max - min) / step) + 1 },
-          (_, i) => min + i * step
-        );
+        const stepSize = step || 1;
+
+        // Calculate exact number of steps
+        const numSteps = Math.floor((max - min) / stepSize) + 1;
+        const values = [];
+
+        // Generate values with exact step count
+        for (let i = 0; i < numSteps; i++) {
+          // Ensure we don't exceed max due to floating point errors
+          const value = Number(Math.min(min + i * stepSize, max).toFixed(10));
+          values.push(value);
+        }
+
+        // Ensure max value is included if it wasn't due to rounding
+        if (values[values.length - 1] < max) {
+          values.push(Number(max.toFixed(10)));
+        }
+
+        result = values;
+
+        // Debug output for verification
+        console.log(`Range [${min}, ${max}] with step ${stepSize} generated ${values.length} values:`, values);
       } else {
         result = optimization;
       }
@@ -120,7 +137,20 @@ if (!isMainThread) {
     // Generate parameter combinations more efficiently with iterator
     function* generateCombinations(parameters: Map<string, any>): Generator<any> {
       const entries = Array.from(parameters.entries());
-      const values = entries.map(([_, config]) => generateParameterValues(config));
+      const values = entries.map(([name, config]) => {
+        const vals = generateParameterValues({
+          optimization: config.optimization,
+          step: config.step
+        });
+        return vals;
+      });
+
+      // Debug: Print the number of values for each parameter
+      console.log('\nParameter value counts:');
+      entries.forEach(([name], index) => {
+        console.log(`${name}: ${values[index].length} values (${values[index].join(', ')})`);
+      });
+
       const totalCombinations = values.reduce((acc, arr) => acc * arr.length, 1);
 
       for (let i = 0; i < totalCombinations; i++) {
