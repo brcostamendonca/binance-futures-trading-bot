@@ -6,71 +6,195 @@ import { getPositionSizeByRisk } from '../strategies/riskManagement';
 export const hyperParameters = {
   // ADX - Trend Strength (from BTC-USDT optimal settings)
   adxType: { value: 'MASANAKAMURA' },
-  adxLength: { value: 33, optimization: [10, 50] }, // Longer for BTC's volatility
-  adxThreshold: { value: 12, optimization: [5, 20] }, // More sensitive to catch trends early
+  adxLength: {
+    value: 33, // Longer for BTC's volatility
+    optimization: [20, 40],
+    optimizationStep: 2  // Reduced range and added step
+  },
+  adxThreshold: {
+    value: 12, // More sensitive to catch trends early
+    optimization: [8, 16],
+    optimizationStep: 1
+  },
 
-  // Support/Resistance
-  supportResistanceLeftBars: { value: 7, optimization: [5, 10] },
-  supportResistanceRightBars: { value: 8, optimization: [5, 10] },
+  // Support/Resistance - Reduced range for faster optimization
+  supportResistanceLeftBars: {
+    value: 7,  // Balanced for 15m timeframe
+    optimization: [6, 9],
+    optimizationStep: 1
+  },
+  supportResistanceRightBars: {
+    value: 8,  // Slightly more forward-looking
+    optimization: [6, 9],
+    optimizationStep: 1
+  },
 
-  // Volume Analysis
-  volumeMultiplier: { value: 1.4, optimization: [1, 3] }, // Strong volume confirmation
-  volumeLength: { value: 24, optimization: [10, 50] },
+  // Volume Analysis - More focused ranges for strong confirmation
+  volumeMultiplier: {
+    value: 1.4, // Strong volume confirmation
+    optimization: [1.2, 2.0],
+    optimizationStep: 0.1
+  },
+  volumeLength: {
+    value: 24, // About 6 hours of data on 15m
+    optimization: [20, 30],
+    optimizationStep: 2
+  },
 
-  // PSAR for Trend Direction
-  psarStep: { value: 0.2, optimization: [0.1, 0.5] },
-  psarMax: { value: 0.1, optimization: [0.05, 0.2] },
+  // PSAR for Trend Direction - Smaller ranges for critical parameters
+  psarStep: {
+    value: 0.2, // Balanced sensitivity
+    optimization: [0.15, 0.25],
+    optimizationStep: 0.01
+  },
+  psarMax: {
+    value: 0.1, // Conservative max step
+    optimization: [0.08, 0.15],
+    optimizationStep: 0.01
+  },
 
   // Range Filter for Volatility
-  rangeFilterSourceType: { value: 'open' },
-  rangeFilterPeriod: { value: 8, optimization: [5, 20] },
-  rangeFilterMultiplier: { value: 1.4, optimization: [1, 3] },
+  rangeFilterSourceType: { value: 'open' }, // More stable price reference
+  rangeFilterPeriod: {
+    value: 8, // Quick to react to changes
+    optimization: [6, 12],
+    optimizationStep: 1
+  },
+  rangeFilterMultiplier: {
+    value: 1.4, // Strong trend confirmation
+    optimization: [1.2, 1.8],
+    optimizationStep: 0.1
+  },
 
-  // MACD for Momentum
-  macdFastLength: { value: 15, optimization: [5, 30] },
-  macdSlowLength: { value: 17, optimization: [10, 30] },
-  macdSourceType: { value: 'open' },
-  macdSignalLength: { value: 20, optimization: [10, 30] },
+  // MACD for Momentum - Focused ranges based on common values
+  macdFastLength: {
+    value: 15, // Quick to react
+    optimization: [12, 18],
+    optimizationStep: 1
+  },
+  macdSlowLength: {
+    value: 17, // Not too far from fast for quicker signals
+    optimization: [15, 21],
+    optimizationStep: 1
+  },
+  macdSourceType: { value: 'open' }, // More predictive
+  macdSignalLength: {
+    value: 20, // Smooth enough to avoid noise
+    optimization: [15, 25],
+    optimizationStep: 1
+  },
 
-  // RSI Settings
-  rsiLength: { value: 55, optimization: [10, 100] }, // Longer period for more reliable signals
+  // RSI Settings - More focused optimization
+  rsiLength: {
+    value: 55, // Longer period for more reliable signals
+    optimization: [45, 65],
+    optimizationStep: 2
+  },
   rsiSourceType: { value: 'low', optimization: ['low', 'high'] }, // Using low prices for better oversold signals
 
-  // Momentum
-  momentumLength: { value: 10, optimization: [5, 30] },
-  momentumTmoLength: { value: 3, optimization: [1, 10] },
-  momentumSmoothLength: { value: 21, optimization: [10, 50] },
+  // Momentum - Reduced ranges for precision
+  momentumLength: {
+    value: 10, // Fast momentum detection
+    optimization: [8, 15],
+    optimizationStep: 1
+  },
+  momentumTmoLength: {
+    value: 3, // Very quick for TMO
+    optimization: [2, 5],
+    optimizationStep: 1
+  },
+  momentumSmoothLength: {
+    value: 21, // Smooth enough to avoid noise
+    optimization: [15, 25],
+    optimizationStep: 2
+  },
 
-  // Moving Averages
-  maLength: { value: 17, optimization: [5, 30] },
-  maSourceType: { value: 'open', optimization: ['open', 'close'] },
-  jmaLength: { value: 14, optimization: [5, 30] },
-  jmaSourceType: { value: 'low', optimization: ['low', 'high'] },
+  // Moving Averages - Focused ranges for trend confirmation
+  maLength: {
+    value: 17, // Medium-term trend
+    optimization: [14, 20],
+    optimizationStep: 1
+  },
+  maSourceType: { value: 'open', optimization: ['open', 'close'] }, // More predictive
+  jmaLength: {
+    value: 14, // Shorter for JMA's better smoothing
+    optimization: [10, 18],
+    optimizationStep: 1
+  },
+  jmaSourceType: { value: 'low', optimization: ['low', 'high'] }, // Better support detection
 
-  // Scalping Parameters
-  emaScalpingLength: { value: 3, optimization: [1, 10] },
-  scalpingFastEmaLength: { value: 10, optimization: [5, 30] },
-  scalpingMediumEmaLength: { value: 120, optimization: [50, 200] },
-  scalpingSlowEmaLength: { value: 250, optimization: [100, 500] },
-  scalpingLookBack: { value: 12, optimization: [5, 30] },
-  scalpingUseHeikinAshiCandles: { value: true, optimization: [true, false] },
+  // Scalping Parameters - More focused ranges for quick trades
+  emaScalpingLength: {
+    value: 3, // Very fast reaction
+    optimization: [2, 5],
+    optimizationStep: 1
+  },
+  scalpingFastEmaLength: {
+    value: 10, // Quick trend detection
+    optimization: [8, 15],
+    optimizationStep: 1
+  },
+  scalpingMediumEmaLength: {
+    value: 120, // Intermediate trend
+    optimization: [100, 150],
+    optimizationStep: 10
+  },
+  scalpingSlowEmaLength: {
+    value: 250, // Long-term trend
+    optimization: [200, 300],
+    optimizationStep: 25
+  },
+  scalpingLookBack: {
+    value: 12, // About 3 hours of data
+    optimization: [10, 15],
+    optimizationStep: 1
+  },
+  scalpingUseHeikinAshiCandles: { value: true, optimization: [true, false] }, // Better trend visualization
 
-  // RMI Settings
-  rmiLength: { value: 33, optimization: [10, 50] },
-  rmiSourceType: { value: 'close', optimization: ['close', 'open'] },
-  rmiMomentumLength: { value: 15, optimization: [5, 30] },
-  rmiOversold: { value: 44, optimization: [20, 80] },
-  rmiOverbought: { value: 62, optimization: [40, 100] },
+  // RMI Settings - Focused ranges for momentum
+  rmiLength: {
+    value: 33, // Balanced sensitivity
+    optimization: [25, 40],
+    optimizationStep: 3
+  },
+  rmiSourceType: { value: 'close', optimization: ['close', 'open'] }, // Traditional momentum
+  rmiMomentumLength: {
+    value: 15, // Medium momentum window
+    optimization: [12, 18],
+    optimizationStep: 1
+  },
+  rmiOversold: {
+    value: 44, // Conservative oversold
+    optimization: [35, 50],
+    optimizationStep: 3
+  },
+  rmiOverbought: {
+    value: 62, // Conservative overbought
+    optimization: [55, 70],
+    optimizationStep: 3
+  },
 
-  // Bollinger Bands
-  bollingerBandsLength: { value: 20 },
-  bollingerBandsSourceType: { value: 'high' },
-  bollingerBandsMultiplier: { value: 2 },
+  // Bollinger Bands - Keep fixed as they're working well
+  bollingerBandsLength: { value: 20 }, // Standard period
+  bollingerBandsSourceType: { value: 'high' }, // Better resistance detection
+  bollingerBandsMultiplier: { value: 2 }, // Standard deviation multiplier
 
-  // Risk Management - Optimized for BTC's volatility
-  tpLongPercent: { value: 0.02, optimization: [0.01, 0.05] },  // 2% first target
-  tpShortPercent: { value: 0.02, optimization: [0.01, 0.05] }, // 2% first target
-  slPercent: { value: 0.01, optimization: [0.005, 0.02] },      // 1% stop loss for better R:R
+  // Risk Management - Focused ranges for critical parameters
+  tpLongPercent: {
+    value: 0.02, // 2% first target
+    optimization: [0.015, 0.025],
+    optimizationStep: 0.001
+  },
+  tpShortPercent: {
+    value: 0.02, // 2% first target
+    optimization: [0.015, 0.025],
+    optimizationStep: 0.001
+  },
+  slPercent: {
+    value: 0.01, // 1% stop loss for better R:R
+    optimization: [0.008, 0.015],
+    optimizationStep: 0.001
+  },
 };
 
 export const config: AbstractStrategyConfig = (parameters) => [
