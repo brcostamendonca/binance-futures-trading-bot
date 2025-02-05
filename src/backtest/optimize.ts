@@ -223,6 +223,10 @@ if (!isMainThread) {
 
     // Optimized comparison function with early exit
     function compareStrategyReport(a: StrategyReport, b: StrategyReport) {
+      // Filter out strategies with too high drawdown
+      if (Math.abs(a.maxRelativeDrawdown) > 1) return false;
+      if (Math.abs(b.maxRelativeDrawdown) > 1) return false;
+
       const roiA = (a.finalCapital - a.initialCapital) / a.initialCapital;
       const roiB = (b.finalCapital - b.initialCapital) / b.initialCapital;
 
@@ -233,18 +237,21 @@ if (!isMainThread) {
       const drawdownA = Math.abs(a.maxRelativeDrawdown);
       const drawdownB = Math.abs(b.maxRelativeDrawdown);
 
-      const scoreA = drawdownA === 0 ? roiA : roiA / drawdownA;
-      const scoreB = drawdownB === 0 ? roiB : roiB / drawdownB;
+      // Weight ROI more heavily than drawdown for better optimization speed
+      const scoreA = roiA / (drawdownA + 0.1); // Add 0.1 to avoid division by zero
+      const scoreB = roiB / (drawdownB + 0.1);
 
       return scoreA > scoreB;
     }
 
-    // Enhanced worker pool with auto-scaling
+    // Enhanced worker pool with auto-scaling and better memory management
     class WorkerPool {
       private workers: Worker[] = [];
       private activeWorkers = 0;
       private lastBatchDuration = 0;
       private readonly startTime: number;
+      private batchSizes: number[] = [];
+      private lastMemoryUsage = 0;
 
       constructor(private maxWorkers: number) {
         this.startTime = Date.now();
@@ -252,11 +259,18 @@ if (!isMainThread) {
 
       private adjustBatchSize(duration: number) {
         this.lastBatchDuration = duration;
-        // Auto-adjust batch size based on duration and memory usage
+        this.batchSizes.push(duration);
+        if (this.batchSizes.length > 5) this.batchSizes.shift();
+
+        const avgDuration = this.batchSizes.reduce((a, b) => a + b, 0) / this.batchSizes.length;
         const memUsage = process.memoryUsage().heapUsed / process.memoryUsage().heapTotal;
-        if (duration > 30000 && memUsage < MEMORY_LIMIT) {
+        const memDelta = memUsage - this.lastMemoryUsage;
+        this.lastMemoryUsage = memUsage;
+
+        // Adjust batch size based on memory trend and duration
+        if (avgDuration > 30000 || memDelta > 0.1) {
           return Math.max(MIN_BATCH_SIZE, BATCH_SIZE * 0.8);
-        } else if (duration < 10000 && memUsage < MEMORY_LIMIT * 0.7) {
+        } else if (avgDuration < 10000 && memDelta < 0.05 && memUsage < MEMORY_LIMIT * 0.7) {
           return Math.min(MAX_BATCH_SIZE, BATCH_SIZE * 1.2);
         }
         return BATCH_SIZE;
@@ -284,7 +298,13 @@ if (!isMainThread) {
             if (result.error) {
               reject(result.error);
             } else {
-              resolve(result);
+              // Early filtering of invalid strategies
+              const { strategyReport } = result;
+              if (Math.abs(strategyReport.maxRelativeDrawdown) > 1) {
+                resolve(null); // Skip invalid strategies
+              } else {
+                resolve(result);
+              }
             }
             this.activeWorkers--;
             worker.terminate();
@@ -309,8 +329,9 @@ if (!isMainThread) {
         console.log(`\nProcessing batch of ${combinations.length} combinations`);
 
         const promises = combinations.map(params => {
-          // Log the actual parameter values
+          // Log only parameter values being optimized
           const parameterInfo = Object.entries(params)
+            .filter(([key, value]: [string, any]) => StrategyHyperParameters[key]?.optimization)
             .map(([key, value]: [string, any]) => `${key}: ${value.value}`)
             .join(', ');
           console.log(`Spawning worker with parameters: ${parameterInfo}`);
@@ -323,7 +344,8 @@ if (!isMainThread) {
           return { error: e };
         })));
 
-        const validResults = results.filter(r => typeof r === 'object' && r !== null && !('error' in r));
+        // Filter out null results (invalid strategies) and errors
+        const validResults = results.filter(r => r && typeof r === 'object' && !('error' in r));
         const batchDuration = Date.now() - batchStartTime;
         console.log(`\nBatch completed in ${(batchDuration / 1000).toFixed(1)}s: ${validResults.length} valid results out of ${results.length} total`);
 
@@ -336,13 +358,15 @@ if (!isMainThread) {
       cleanup() {
         this.workers.forEach(worker => worker.terminate());
         this.workers = [];
+        if (global.gc) global.gc();
       }
 
       getStats() {
         return {
           activeWorkers: this.activeWorkers,
           lastBatchDuration: this.lastBatchDuration,
-          uptime: Date.now() - this.startTime
+          uptime: Date.now() - this.startTime,
+          avgBatchDuration: this.batchSizes.reduce((a, b) => a + b, 0) / this.batchSizes.length
         };
       }
     }

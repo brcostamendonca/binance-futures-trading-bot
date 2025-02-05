@@ -7,19 +7,19 @@ export const hyperParameters = {
   // ADX - Trend Strength (from BTC-USDT optimal settings)
   adxType: { value: 'MASANAKAMURA' },
   adxLength: {
-    value: 10, // Longer for BTC's volatility
+    value: 20, // Longer for BTC's volatility
     optimization: [10, 55],
     optimizationStep: 15  // Reduced range and added step
   },
   adxThreshold: {
-    value: 12, // More sensitive to catch trends early
+    value: 6, // More sensitive to catch trends early
     optimization: [6, 18],
     optimizationStep: 6
   },
 
   // Support/Resistance - Reduced range for faster optimization
   supportResistanceLeftBars: {
-    value: 6,  // Balanced for 15m timeframe
+    value: 1,  // Balanced for 15m timeframe
     optimization: [3, 9],
     optimizationStep: 3
   },
@@ -31,12 +31,12 @@ export const hyperParameters = {
 
   // Volume Analysis - More focused ranges for strong confirmation
   volumeMultiplier: {
-    value: 1.5, // Strong volume confirmation
+    value: 1, // Strong volume confirmation
     optimization: [1.0, 2.0],
     optimizationStep: 0.5
   },
   volumeLength: {
-    value: 25, // About 6 hours of data on 15m
+    value: 20, // About 6 hours of data on 15m
     optimization: [20, 30],
     optimizationStep: 5
   },
@@ -193,17 +193,17 @@ export const hyperParameters = {
 
   // Risk Management - Focused ranges for critical parameters
   tpLongPercent: {
-    value: 0.02, // 2% first target
+    value: 0.01, // 2% first target
     optimization: [0.01, 0.04],
     optimizationStep: 0.01
   },
   tpShortPercent: {
-    value: 0.02, // 2% first target
+    value: 0.01, // 2% first target
     optimization: [0.01, 0.04],
     optimizationStep: 0.01
   },
   slPercent: {
-    value: 0.01, // 1% stop loss for better R:R
+    value: 0.005, // 1% stop loss for better R:R
     optimization: [0.005, 0.02],
     optimizationStep: 0.005
   },
