@@ -187,7 +187,7 @@ export const hyperParameters = {
   },
 
   // Bollinger Bands - Keep fixed as they're working well
-  bollingerBandsLength: { value: 20 }, // Standard period
+  bollingerBandsLength: { value: 8 }, // Standard period
   bollingerBandsSourceType: { value: 'high' }, // Better resistance detection
   bollingerBandsMultiplier: { value: 2 }, // Standard deviation multiplier
 
@@ -203,7 +203,7 @@ export const hyperParameters = {
     optimizationStep: 0.01
   },
   slPercent: {
-    value: 0.005, // 1% stop loss for better R:R
+    value: 0.05, // 1% stop loss for better R:R
     optimization: [0.005, 0.02],
     optimizationStep: 0.005
   },
@@ -215,7 +215,7 @@ export const config: AbstractStrategyConfig = (parameters) => [
     base: 'USDT',
     loopInterval: CandleChartInterval.FIFTEEN_MINUTES, // Balance between opportunities and noise
     indicatorIntervals: [CandleChartInterval.FIFTEEN_MINUTES],
-    risk: 0.015, // 1.5% risk per trade - More conservative
+    risk: 0.010, // 1.5% risk per trade - More conservative
     leverage: 3,
     unidirectional: false,
     canOpenNewPositionToCloseLast: true,
