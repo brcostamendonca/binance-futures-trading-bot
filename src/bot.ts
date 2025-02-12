@@ -580,16 +580,15 @@ export class Bot {
           : { takeProfits: [], stopLoss: null };
 
         //Calculate the quantity for the position according to the risk management of the strategy
-        let quantity = riskManagement({
+        const quantity = riskManagement({
           asset,
           base,
-          balance: allowPyramiding
-            ? Number(assetBalance)
-            : Number(availableBalance),
+          balance: allowPyramiding ? Number(assetBalance) : Number(availableBalance),
           risk,
           enterPrice: currentPrice,
           stopLossPrice: stopLoss,
           exchangeInfo: this.exchangeInfo,
+          leverage: strategyConfig.leverage || 1,
         });
 
         try {
@@ -770,16 +769,15 @@ export class Bot {
           : { takeProfits: [], stopLoss: null };
 
         // Calculate the quantity for the position according to the risk management of the strategy
-        let quantity = riskManagement({
+        const quantity = riskManagement({
           asset,
           base,
-          balance: allowPyramiding
-            ? Number(assetBalance)
-            : Number(availableBalance),
+          balance: allowPyramiding ? Number(assetBalance) : Number(availableBalance),
           risk,
           enterPrice: currentPrice,
           stopLossPrice: stopLoss,
           exchangeInfo: this.exchangeInfo,
+          leverage: strategyConfig.leverage || 1,
         });
 
         try {

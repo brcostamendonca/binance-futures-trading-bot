@@ -82,6 +82,7 @@ interface RiskManagementOptions {
   enterPrice: number;
   stopLossPrice?: number;
   exchangeInfo: ExchangeInfo;
+  leverage?: number;
 }
 type RiskManagement = (options: RiskManagementOptions) => number; // Return the size of the position
 

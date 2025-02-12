@@ -15,10 +15,11 @@ export function getPositionSizeByPercent({
   risk,
   enterPrice,
   exchangeInfo,
+  leverage = 1,
 }: RiskManagementOptions) {
   let pair = asset + base;
   let quantityPrecision = getQuantityPrecision(pair, exchangeInfo);
-  let quantity = (balance * risk) / enterPrice;
+  let quantity = (balance * risk * leverage) / enterPrice;
   let minQuantity = getMinOrderQuantity(asset, base, enterPrice, exchangeInfo);
 
   return quantity > minQuantity
@@ -37,6 +38,7 @@ export function getPositionSizeByRisk({
   enterPrice,
   stopLossPrice,
   exchangeInfo,
+  leverage = 1,
 }: RiskManagementOptions) {
   if (!stopLossPrice) {
     return getPositionSizeByPercent({
@@ -46,13 +48,14 @@ export function getPositionSizeByRisk({
       risk,
       enterPrice,
       exchangeInfo,
+      leverage,
     });
   }
   let pair = asset + base;
   let quantityPrecision = getQuantityPrecision(pair, exchangeInfo);
   let riskBalance = balance * risk;
   let delta = Math.abs(stopLossPrice - enterPrice) / enterPrice;
-  let quantity = riskBalance / delta / enterPrice;
+  let quantity = (riskBalance / delta / enterPrice) * leverage;
   let minQuantity = getMinOrderQuantity(asset, base, enterPrice, exchangeInfo);
 
   return quantity > minQuantity

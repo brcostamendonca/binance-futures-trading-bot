@@ -215,8 +215,8 @@ export const config: AbstractStrategyConfig = (parameters) => [
     base: 'USDT',
     loopInterval: CandleChartInterval.FIFTEEN_MINUTES, // Balance between opportunities and noise
     indicatorIntervals: [CandleChartInterval.FIFTEEN_MINUTES],
-    risk: 0.010, // 1.5% risk per trade - More conservative
-    leverage: 3,
+    risk: 0.015, // 1.5% risk per trade - More conservative
+    leverage: 1,
     unidirectional: false,
     canOpenNewPositionToCloseLast: true,
     exitStrategy: (price, candles, pricePrecision, side, exchangeInfo) =>

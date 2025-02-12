@@ -999,13 +999,12 @@ export class BasicBackTestBot {
       let quantity = riskManagement({
         asset,
         base,
-        balance: allowPyramiding
-          ? Number(assetBalance)
-          : Number(availableBalance),
+        balance: allowPyramiding ? Number(assetBalance) : Number(availableBalance),
         risk,
         enterPrice: currentPrice,
         stopLossPrice: stopLoss,
         exchangeInfo,
+        leverage: strategyConfig.leverage || 1,
       });
 
       // Fix size issue
@@ -1112,6 +1111,7 @@ export class BasicBackTestBot {
         enterPrice: currentPrice,
         stopLossPrice: stopLoss,
         exchangeInfo,
+        leverage: strategyConfig.leverage || 1,
       });
 
       // Fix size issue
