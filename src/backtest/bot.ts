@@ -31,6 +31,11 @@ import {
   timeFrameToMinutes,
 } from '../utils/timeFrame';
 
+// Constants for error handling
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds
+const REQUEST_TIMEOUT = 30000; // 30 seconds
+
 // ====================================================================== //
 
 const BacktestConfig = BotConfig['backtest'];
@@ -52,7 +57,7 @@ const bar = process.env.NODE_ENV !== 'worker' ? new cliProgress.SingleBar(
 const SAVE_HISTORY = process.env.NODE_ENV === 'worker' ? false : BacktestConfig['save_db'];
 
 // Debug mode with console.log
-export const DEBUG = process.env.NODE_ENV === 'worker' ? false : commandArguments.debug === 'true';
+export const DEBUG = true;  // Force debug mode on
 
 // Exchange fee info
 const TAKER_FEES = BotConfig['taker_fees_futures']; // %
@@ -552,67 +557,79 @@ export class BasicBackTestBot {
       totalFees,
     } = this.strategyReport;
 
+    // Ensure we don't divide by zero
+    totalLongTrades = totalLongTrades || 0;
+    totalShortTrades = totalShortTrades || 0;
+    longWinningTrade = longWinningTrade || 0;
+    shortWinningTrade = shortWinningTrade || 0;
+    longLostTrade = longLostTrade || 0;
+    shortLostTrade = shortLostTrade || 0;
+
     this.strategyReport.testPeriod = `${dayjs(this.startDate).format(
       'YYYY-MM-DD HH:mm:ss'
     )} to ${dayjs(this.endDate).format('YYYY-MM-DD HH:mm:ss')}`;
+    
     this.strategyReport.finalCapital = decimalFloor(
       this.wallet.totalWalletBalance,
       2
     );
+    
     this.strategyReport.totalNetProfit = decimalFloor(
       this.wallet.totalWalletBalance - this.initialCapital,
       2
     );
-    this.strategyReport.totalProfit = decimalFloor(
-      this.strategyReport.totalProfit,
-      2
-    );
-    this.strategyReport.totalLoss = decimalFloor(
-      this.strategyReport.totalLoss,
-      2
-    );
-    this.strategyReport.totalFees = -decimalFloor(
-      this.strategyReport.totalFees,
-      2
-    );
-    this.strategyReport.profitFactor = decimalFloor(
-      totalProfit / (Math.abs(totalLoss) + totalFees),
-      2
-    );
+    
+    this.strategyReport.totalProfit = decimalFloor(totalProfit, 2);
+    this.strategyReport.totalLoss = decimalFloor(totalLoss, 2);
+    this.strategyReport.totalFees = -decimalFloor(totalFees, 2);
+    
+    // Calculate profit factor safely
+    const totalAbsLoss = Math.abs(totalLoss);
+    const totalAbsFees = Math.abs(totalFees);
+    this.strategyReport.profitFactor = totalAbsLoss + totalAbsFees > 0 
+      ? decimalFloor(totalProfit / (totalAbsLoss + totalAbsFees), 2)
+      : 0;
+
     this.strategyReport.maxAbsoluteDrawdown = -decimalFloor(
       (1 - this.maxAbsoluteDrawdown) * 100,
       2
     );
+    
     this.strategyReport.maxRelativeDrawdown = decimalCeil(
       this.maxRelativeDrawdown * 100,
       2
     );
 
-    this.strategyReport.longWinRate = decimalFloor(
-      (longWinningTrade / totalLongTrades) * 100,
-      2
-    );
-    this.strategyReport.shortWinRate = decimalFloor(
-      (shortWinningTrade / totalShortTrades) * 100,
-      2
-    );
-    this.strategyReport.totalWinRate = decimalFloor(
-      ((longWinningTrade + shortWinningTrade) / totalTrades) * 100,
-      2
-    );
+    // Calculate win rates safely
+    this.strategyReport.longWinRate = totalLongTrades > 0
+      ? decimalFloor((longWinningTrade / totalLongTrades) * 100, 2)
+      : 0;
+      
+    this.strategyReport.shortWinRate = totalShortTrades > 0
+      ? decimalFloor((shortWinningTrade / totalShortTrades) * 100, 2)
+      : 0;
+      
+    this.strategyReport.totalWinRate = totalTrades > 0
+      ? decimalFloor(((longWinningTrade + shortWinningTrade) / totalTrades) * 100, 2)
+      : 0;
+
     this.strategyReport.maxProfit = decimalFloor(this.maxProfit, 2);
     this.strategyReport.maxLoss = -decimalFloor(this.maxLoss, 2);
-    this.strategyReport.avgProfit = decimalFloor(
-      totalProfit / (longWinningTrade + shortWinningTrade),
-      2
-    );
-    this.strategyReport.avgLoss = decimalFloor(
-      totalLoss / (longLostTrade + shortLostTrade),
-      2
-    );
+    
+    // Calculate average profit/loss safely
+    const totalWinningTrades = longWinningTrade + shortWinningTrade;
+    const totalLosingTrades = longLostTrade + shortLostTrade;
+    
+    this.strategyReport.avgProfit = totalWinningTrades > 0
+      ? decimalFloor(totalProfit / totalWinningTrades, 2)
+      : 0;
+      
+    this.strategyReport.avgLoss = totalLosingTrades > 0
+      ? decimalFloor(totalLoss / totalLosingTrades, 2)
+      : 0;
+
     this.strategyReport.maxConsecutiveWinsCount = this.maxConsecutiveWinsCount;
-    this.strategyReport.maxConsecutiveLossesCount =
-      this.maxConsecutiveLossesCount;
+    this.strategyReport.maxConsecutiveLossesCount = this.maxConsecutiveLossesCount;
     this.strategyReport.maxConsecutiveProfit = decimalFloor(
       this.maxConsecutiveProfitCount,
       2
@@ -852,7 +869,10 @@ export class BasicBackTestBot {
     const position = positions.find((position) => position.pair === pair);
     const hasLongPosition = position.size > 0;
     const hasShortPosition = position.size < 0;
-    const pnl = this.getPositionPNL(position, currentPrice);
+    const positionSize = Math.abs(position.size);
+
+    // Calculate PnL before any position changes
+    const currentPnL = this.getPositionPNL(position, currentPrice);
 
     // Open orders
     const currentOpenOrders = this.openOrders.filter(
@@ -866,7 +886,7 @@ export class BasicBackTestBot {
     // Conditions to take or not a position
     const canAddToPosition = allowPyramiding
       ? position.margin + assetBalance * risk <=
-      assetBalance * maxPyramidingAllocation
+        assetBalance * maxPyramidingAllocation
       : false;
     const canTakeLongPosition =
       (canOpenNewPositionToCloseLast && hasShortPosition) ||
@@ -912,27 +932,34 @@ export class BasicBackTestBot {
         logging.log(
           `The position on ${pair} is longer that the maximum authorized duration. Position has been closed.`
         );
-        this.order({
-          pair,
-          price: currentPrice,
-          quantity: -position.size,
-          side: hasLongPosition ? 'SELL' : 'BUY',
-          type: 'MARKET',
-          date,
-          quantityPrecision,
-        });
-        this.counters[pair].reset();
-        this.closeOpenOrders(pair);
+        
+        // Calculate final PnL
+        const closingPnL = this.getPositionPNL(position, currentPrice);
+        
+        // Update position
+        const oldSize = position.size;
+        position.size = 0;
+        position.margin = 0;
+        position.entryPrice = 0;
+        position.unrealizedProfit = 0;
+        
+        // Update trade stats
+        this.updateTradeStats(position, closingPnL);
+        
+        // Add to historic
         this.addToHistoric(
           date,
           pair,
           hasLongPosition ? 'SELL' : 'BUY',
           'MARKET',
           'CLOSE',
-          -position.size,
+          -oldSize,
           currentPrice,
-          pnl
+          closingPnL
         );
+        
+        this.counters[pair].reset();
+        this.closeOpenOrders(pair);
         return;
       }
     }
@@ -1166,14 +1193,37 @@ export class BasicBackTestBot {
         }
       }
     }
+
+    // Add to historic
+    this.addToHistoric(
+      date,
+      pair,
+      currentPnL > 0 ? 'BUY' : 'SELL',
+      currentPnL > 0 ? 'MARKET' : 'MARKET',
+      currentPnL > 0 ? 'OPEN' : 'CLOSE',
+      Math.abs(currentPnL) > 0 ? Math.abs(currentPnL) : 0,
+      currentPnL > 0 ? currentPrice : currentPrice,
+      currentPnL
+    );
+  }
+
+  /**
+   * Update trade statistics when a position is closed
+   */
+  private updateTradeStats(position: Position, pnl: number) {
+    if (pnl > 0) {
+      if (position.positionSide === 'LONG') this.strategyReport.longWinningTrade++;
+      if (position.positionSide === 'SHORT') this.strategyReport.shortWinningTrade++;
+      this.strategyReport.totalProfit += pnl;
+    } else {
+      if (position.positionSide === 'LONG') this.strategyReport.longLostTrade++;
+      if (position.positionSide === 'SHORT') this.strategyReport.shortLostTrade++;
+      this.strategyReport.totalLoss += pnl;
+    }
   }
 
   /**
    * Check if the margin is enough to maintain the position. If not, the position is liquidated
-   * @param pair
-   * @param currentPrice The current price in the main loop
-   * @param date
-   * @param exchangeInfo
    */
   private checkPositionMargin(
     pair: string,
@@ -1182,11 +1232,20 @@ export class BasicBackTestBot {
     exchangeInfo: ExchangeInfo<FuturesOrderType_LT>
   ) {
     const position = this.wallet.positions.find((pos) => pos.pair === pair);
-    const { margin, unrealizedProfit, size, positionSide } = position;
+    const { margin, size, positionSide, leverage } = position;
     const quantityPrecision = getQuantityPrecision(pair, exchangeInfo);
 
-    if (size !== 0 && margin + unrealizedProfit <= 0) {
-      logging.log(`The position on ${pair} has reached the liquidation price.`);
+    // Calculate maintenance margin requirement (0.5% for example)
+    const maintenanceMarginRate = 0.005;
+    const positionValue = Math.abs(size * currentPrice);
+    const maintenanceMargin = positionValue * maintenanceMarginRate;
+    
+    // Calculate current margin level including unrealized PnL
+    const unrealizedProfit = this.getPositionPNL(position, currentPrice);
+    const currentMargin = margin + unrealizedProfit;
+
+    if (size !== 0 && currentMargin <= maintenanceMargin) {
+      logging.log(`Position on ${pair} liquidated due to insufficient margin`);
       this.order({
         pair,
         price: currentPrice,
@@ -1198,7 +1257,7 @@ export class BasicBackTestBot {
       });
 
       this.closeOpenOrders(pair);
-      this.updateProfitLossStrategyProperty(unrealizedProfit);
+      this.updateTradeStats(position, unrealizedProfit);
       this.addToHistoric(
         date,
         pair,
@@ -1207,20 +1266,13 @@ export class BasicBackTestBot {
         'CLOSE',
         -size,
         currentPrice,
-        this.getPositionPNL(position, currentPrice)
+        unrealizedProfit
       );
-
-      if (position.positionSide === 'LONG') this.strategyReport.longLostTrade++;
-      if (position.positionSide === 'SHORT')
-        this.strategyReport.shortLostTrade++;
     }
   }
 
   /**
    * Check the open orders based on the current price. If the price crosses an order, this latter is activated.
-   * @param asset
-   * @param base
-   * @param lastCandle
    */
   private checkOpenOrders(asset: string, base: string, lastCandle: CandleData) {
     if (this.openOrders.length > 0) {
@@ -1231,11 +1283,11 @@ export class BasicBackTestBot {
       );
       const { entryPrice, size, leverage } = position;
       const wallet = this.wallet;
-      const hasPosition = position.size !== 0;
+      const hasPosition = size !== 0;
       const date = new Date(lastCandle.openTime);
 
       orders
-        .sort((order1, order2) => order2.price - order1.price) // sort orders from nearest price to furthest price
+        .sort((order1, order2) => order2.price - order1.price)
         .every((order) => {
           const { id, price, quantity, type, side } = order;
 
@@ -1246,10 +1298,9 @@ export class BasicBackTestBot {
           ) {
             const fees = Math.abs(quantity) * price * (MAKER_FEES / 100);
 
-            // Average the entry price
             if (
-              (position.positionSide === 'LONG' && side === 'BUY') ||
-              (position.positionSide === 'SHORT' && side === 'SELL')
+              (position.positionSide === 'LONG' && side === 'SELL') ||
+              (position.positionSide === 'SHORT' && side === 'BUY')
             ) {
               let baseCost = (price * Math.abs(quantity)) / leverage;
 
@@ -1258,9 +1309,9 @@ export class BasicBackTestBot {
                   (price * Math.abs(quantity) + entryPrice * Math.abs(size)) /
                   (Math.abs(quantity) + Math.abs(size));
 
-                position.margin += baseCost;
                 position.size += quantity;
                 position.entryPrice = avgEntryPrice;
+                this.updatePositionMargin(position);
                 wallet.availableBalance -= baseCost + fees;
                 wallet.totalWalletBalance -= fees;
 
@@ -1283,8 +1334,7 @@ export class BasicBackTestBot {
                 );
 
                 logging.log(
-                  `${side === 'BUY' ? 'Buy' : 'Sell'
-                  } limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
+                  `${side === 'BUY' ? 'Buy' : 'Sell'} limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
                   chalk.magenta
                 );
               }
@@ -1294,22 +1344,22 @@ export class BasicBackTestBot {
               (position.positionSide === 'LONG' && side === 'SELL') ||
               (position.positionSide === 'SHORT' && side === 'BUY')
             ) {
-              // Update wallet
-              let pnl = this.getPositionPNL(position, price);
-              wallet.availableBalance += position.margin + pnl - fees;
-              wallet.totalWalletBalance += pnl - fees;
-
-              // Update strategy report
-              this.updateProfitLossStrategyProperty(pnl);
+              // Calculate PnL
+              const closingPnL = this.getPositionPNL(position, price);
 
               // Update position
               position.size += quantity;
-              position.margin = Math.abs(position.size * price) / leverage;
+              this.updatePositionMargin(position);
+
+              // Update wallet
+              this.updateWalletOnPositionClose(wallet, position, quantity, closingPnL, fees);
 
               // The position has been closed
               if (position.size === 0) {
+                this.updateTradeStats(position, closingPnL);
                 position.entryPrice = 0;
                 position.unrealizedProfit = 0;
+                position.margin = 0;
               }
 
               // The order changes the position side of the current position
@@ -1320,26 +1370,13 @@ export class BasicBackTestBot {
                 position.entryPrice = price;
                 position.positionSide =
                   position.positionSide === 'LONG' ? 'SHORT' : 'LONG';
-                let newPnl = this.getPositionPNL(position, price);
-                position.unrealizedProfit = newPnl;
+                const newPnL = this.getPositionPNL(position, price);
+                position.unrealizedProfit = newPnL;
                 wallet.availableBalance -= position.margin;
                 this.strategyReport.totalTrades++;
                 if (side === 'SELL') this.strategyReport.totalShortTrades++;
                 if (side === 'BUY') this.strategyReport.totalLongTrades++;
               }
-
-              if (side === 'BUY') {
-                if (hasPosition && entryPrice >= price)
-                  this.strategyReport.shortWinningTrade++;
-                if (hasPosition && entryPrice < price)
-                  this.strategyReport.shortLostTrade++;
-              } else {
-                if (hasPosition && entryPrice <= price)
-                  this.strategyReport.longWinningTrade++;
-                if (hasPosition && entryPrice > price)
-                  this.strategyReport.longLostTrade++;
-              }
-              this.strategyReport.totalFees += fees;
 
               this.addToHistoric(
                 date,
@@ -1349,12 +1386,11 @@ export class BasicBackTestBot {
                 position.size === 0 ? 'CLOSE' : 'OPEN',
                 quantity,
                 price,
-                pnl
+                closingPnL
               );
 
               logging.log(
-                `${side === 'BUY' ? 'Buy' : 'Sell'
-                } limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
+                `${side === 'BUY' ? 'Buy' : 'Sell'} limit order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
                 chalk.magenta
               );
             }
@@ -1372,36 +1408,23 @@ export class BasicBackTestBot {
                 ? Math.abs(quantity) * price * (MAKER_FEES / 100)
                 : Math.abs(quantity) * price * (TAKER_FEES / 100);
 
-            // Update wallet
-            let pnl = this.getPositionPNL(position, price);
-            wallet.availableBalance += position.margin + pnl - fees;
-            wallet.totalWalletBalance += pnl - fees;
-
-            // Update strategy report
-            this.updateProfitLossStrategyProperty(pnl);
+            // Calculate PnL
+            const closingPnL = this.getPositionPNL(position, price);
 
             // Update position
             position.size += quantity;
-            position.margin = Math.abs(position.size * price) / leverage;
+            this.updatePositionMargin(position);
+
+            // Update wallet
+            this.updateWalletOnPositionClose(wallet, position, quantity, closingPnL, fees);
 
             // The position has been closed
             if (position.size === 0) {
+              this.updateTradeStats(position, closingPnL);
               position.entryPrice = 0;
               position.unrealizedProfit = 0;
+              position.margin = 0;
             }
-
-            if (side === 'BUY') {
-              if (hasPosition && entryPrice >= price)
-                this.strategyReport.shortWinningTrade++;
-              if (hasPosition && entryPrice < price)
-                this.strategyReport.shortLostTrade++;
-            } else {
-              if (hasPosition && entryPrice <= price)
-                this.strategyReport.longWinningTrade++;
-              if (hasPosition && entryPrice > price)
-                this.strategyReport.longLostTrade++;
-            }
-            this.strategyReport.totalFees += fees;
 
             this.addToHistoric(
               date,
@@ -1411,12 +1434,11 @@ export class BasicBackTestBot {
               'CLOSE',
               quantity,
               price,
-              pnl
+              closingPnL
             );
 
             logging.log(
-              `${side === 'BUY' ? 'Buy' : 'Sell'
-              } stop order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
+              `${side === 'BUY' ? 'Buy' : 'Sell'} stop order #${id} has been activated for ${quantity}${asset} at ${price}. Fees: ${fees}`,
               chalk.magenta
             );
 
@@ -1441,18 +1463,15 @@ export class BasicBackTestBot {
    * @param currentPrice
    */
   private getPositionPNL(position: Position, currentPrice: number) {
-    const entryPrice = position.entryPrice;
-    const delta = (currentPrice - entryPrice) / entryPrice;
-
     if (position.size !== 0 && position.margin > 0 && position.entryPrice > 0) {
-      if (position.positionSide === 'LONG') {
-        return delta * position.margin * position.leverage;
-      } else {
-        return -delta * position.margin * position.leverage;
-      }
-    } else {
-      return 0;
+      // Calculate price change percentage
+      const priceChangePercent = (currentPrice - position.entryPrice) / position.entryPrice;
+      // Calculate PnL based on position value
+      const positionValue = Math.abs(position.size * position.entryPrice);
+      const pnl = positionValue * priceChangePercent;
+      return position.positionSide === 'LONG' ? pnl : -pnl;
     }
+    return 0;
   }
 
   /**
@@ -1523,40 +1542,41 @@ export class BasicBackTestBot {
     quantityPrecision: number;
   }) {
     const wallet = this.wallet;
-    const positions = wallet.positions;
-    const position = positions.find((pos) => pos.pair === pair);
-    const { entryPrice, size, leverage } = position;
-    const hasPosition = position.size !== 0;
-
-    if (!hasPosition) position.positionSide = side === 'BUY' ? 'LONG' : 'SHORT';
+    const position = this.wallet.positions.find((pos) => pos.pair === pair);
+    const { size, entryPrice, leverage } = position;
+    const hasPosition = size !== 0;
 
     if (type === 'MARKET') {
       const fees = price * Math.abs(quantity) * (TAKER_FEES / 100);
-
+      
+      // Opening or adding to position
       if (
-        (position.positionSide === 'LONG' && side === 'BUY') ||
-        (position.positionSide === 'SHORT' && side === 'SELL')
+        (!hasPosition && (side === 'BUY' || side === 'SELL')) ||
+        (hasPosition && position.positionSide === 'LONG' && side === 'BUY') ||
+        (hasPosition && position.positionSide === 'SHORT' && side === 'SELL')
       ) {
-        let baseCost = (price * Math.abs(quantity)) / leverage;
-        // If there is enough available base currency
-        if (wallet.availableBalance >= baseCost + fees) {
-          let avgEntryPrice =
-            (price * Math.abs(quantity) + entryPrice * Math.abs(size)) /
-            (Math.abs(quantity) + Math.abs(size));
+        const requiredMargin = (price * Math.abs(quantity)) / leverage;
+        
+        if (wallet.availableBalance >= requiredMargin + fees) {
+          // Fix precision issues
+          const fixedQuantity = decimalRound(quantity, quantityPrecision);
+          
+          // Calculate new average entry price
+          const totalCost = price * Math.abs(fixedQuantity) + (hasPosition ? entryPrice * Math.abs(size) : 0);
+          const totalQuantity = Math.abs(fixedQuantity) + (hasPosition ? Math.abs(size) : 0);
+          const newEntryPrice = totalCost / totalQuantity;
 
-          // Fix issue
-          quantity = decimalRound(quantity, quantityPrecision);
+          // Update position
+          position.size += fixedQuantity;
+          position.entryPrice = newEntryPrice;
+          position.positionSide = side === 'BUY' ? 'LONG' : 'SHORT';
+          this.updatePositionMargin(position);
 
-          position.margin += baseCost;
-          position.size += quantity;
-          position.entryPrice = avgEntryPrice;
-
-          // Fix issue
-          position.size = decimalRound(position.size, quantityPrecision);
-
-          wallet.availableBalance -= baseCost + fees;
+          // Update wallet
+          wallet.availableBalance -= requiredMargin + fees;
           wallet.totalWalletBalance -= fees;
 
+          // Update stats only for new positions, not additions to existing ones
           if (!hasPosition) {
             this.strategyReport.totalTrades++;
             if (side === 'BUY') this.strategyReport.totalLongTrades++;
@@ -1564,97 +1584,37 @@ export class BasicBackTestBot {
           }
           this.strategyReport.totalFees += fees;
 
-          logging.log(
-            `Take a ${side === 'BUY' ? 'long' : 'short'
-            } position on ${pair} with a size of ${quantity} at ${price}. Fees: ${fees}`,
-            chalk.green
-          );
-
-          this.addToHistoric(
-            date,
-            pair,
-            side,
-            type,
-            'OPEN',
-            quantity,
-            price,
-            null
-          );
+          this.addToHistoric(date, pair, side, type, 'OPEN', fixedQuantity, price, null);
         }
       }
-
-      if (
+      // Closing or reducing position
+      else if (
         (position.positionSide === 'LONG' && side === 'SELL') ||
         (position.positionSide === 'SHORT' && side === 'BUY')
       ) {
-        // Update wallet
-        let pnl = this.getPositionPNL(position, price);
-        wallet.availableBalance += position.margin + pnl - fees;
-        wallet.totalWalletBalance += pnl - fees;
-
-        this.updateProfitLossStrategyProperty(pnl);
-
-        // Fix issue
-        quantity = decimalRound(quantity, quantityPrecision);
-
+        const closingPnL = this.getPositionPNL(position, price);
+        const fixedQuantity = decimalRound(quantity, quantityPrecision);
+        
         // Update position
-        position.size += quantity;
-        position.margin = Math.abs(position.size * price) / leverage;
-
-        // Fix issue
-        position.size = decimalRound(position.size, quantityPrecision);
-
-        // The position has been closed
+        position.size += fixedQuantity;
+        
         if (position.size === 0) {
+          // Position fully closed - update trade stats
+          this.updateTradeStats(position, closingPnL);
+          
+          // Reset position
+          position.margin = 0;
           position.entryPrice = 0;
           position.unrealizedProfit = 0;
-        }
-
-        // The order changes the position side of the current position
-        if (
-          (position.positionSide === 'LONG' && position.size < 0) ||
-          (position.positionSide === 'SHORT' && position.size > 0)
-        ) {
-          position.entryPrice = price;
-          position.positionSide =
-            position.positionSide === 'LONG' ? 'SHORT' : 'LONG';
-          let newPnl = this.getPositionPNL(position, price);
-          position.unrealizedProfit = newPnl;
-          wallet.availableBalance -= position.margin;
-          this.strategyReport.totalTrades++;
-          if (side === 'SELL') this.strategyReport.totalShortTrades++;
-          if (side === 'BUY') this.strategyReport.totalLongTrades++;
-        }
-
-        if (side === 'BUY') {
-          if (hasPosition && entryPrice >= price)
-            this.strategyReport.shortWinningTrade++;
-          if (hasPosition && entryPrice < price)
-            this.strategyReport.shortLostTrade++;
         } else {
-          if (hasPosition && entryPrice <= price)
-            this.strategyReport.longWinningTrade++;
-          if (hasPosition && entryPrice > price)
-            this.strategyReport.longLostTrade++;
+          // Position partially closed - update margin
+          this.updatePositionMargin(position);
         }
-        this.strategyReport.totalFees += fees;
 
-        this.addToHistoric(
-          date,
-          pair,
-          side,
-          type,
-          position.size === 0 ? 'CLOSE' : 'OPEN',
-          quantity,
-          price,
-          pnl
-        );
+        // Update wallet
+        this.updateWalletOnPositionClose(wallet, position, fixedQuantity, closingPnL, fees);
 
-        logging.log(
-          `Take a ${side === 'BUY' ? 'long' : 'short'
-          } position on ${pair} with a size of ${quantity} at ${price}. Fees: ${fees}`,
-          chalk.green
-        );
+        this.addToHistoric(date, pair, side, type, 'CLOSE', fixedQuantity, price, closingPnL);
       }
     }
 
@@ -1696,5 +1656,19 @@ export class BasicBackTestBot {
       };
       this.openOrders.push(order);
     }
+  }
+
+  private updatePositionMargin(position: Position) {
+    // Margin is always based on entry price and position size
+    position.margin = Math.abs(position.size * position.entryPrice) / position.leverage;
+  }
+
+  private updateWalletOnPositionClose(wallet: Wallet, position: Position, closedQuantity: number, pnl: number, fees: number) {
+    // Calculate released margin based on entry price (not current price)
+    const releasedMargin = Math.abs(closedQuantity * position.entryPrice) / position.leverage;
+    // Update available balance with released margin and PnL
+    wallet.availableBalance += releasedMargin - fees;
+    // Update total wallet balance with PnL
+    wallet.totalWalletBalance += pnl - fees;
   }
 }

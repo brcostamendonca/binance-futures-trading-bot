@@ -15,7 +15,11 @@ export const Basics = {
 };
 
 import * as BITCOIN_SNIPER_V1 from './complex/bitcoinSniperV1';
+import * as CONSERVATIVE_SNIPER from './complex/conservativeSniper';
+import * as EXPONENTIAL_GROWTH_SNIPER from './complex/exponentialGrowthSniper';
 
 export const Complex = {
   BITCOIN_SNIPER_V1,
+  CONSERVATIVE_SNIPER,
+  EXPONENTIAL_GROWTH_SNIPER,
 };
