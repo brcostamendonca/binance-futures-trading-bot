@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { log } from '../utils/log';
+import { log, error as logError } from '../utils/log';
 import { telegramBot } from '../init';
 
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -13,6 +13,10 @@ if (!CHAT_ID) {
 
 export function sendTelegramMessage(message: string) {
   return new Promise<TelegramBot.Message>((resolve, reject) => {
+    log(`Attempting to send Telegram message: ${message}`);
+    log(`Using chat ID: ${CHAT_ID}`);
+    log(`Bot polling enabled: ${telegramBot.isPolling()}`);
+    
     telegramBot
       .sendMessage(CHAT_ID, message, { parse_mode: 'HTML' })
       .then((messageInfo) => {
@@ -23,9 +27,13 @@ export function sendTelegramMessage(message: string) {
           );
         }
 
-        log(`Telegram message send successfully`);
+        log(`Telegram message sent successfully`);
         resolve(messageInfo);
       })
-      .catch(reject);
+      .catch((err) => {
+        logError(`Failed to send Telegram message: ${err.message}`);
+        logError(`Error details: ${JSON.stringify(err)}`);
+        reject(err);
+      });
   });
 }
