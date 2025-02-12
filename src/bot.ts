@@ -593,7 +593,8 @@ export class Bot {
         });
 
         try {
-          await this.placeOrder({
+          // Place the market order first and wait for confirmation
+          const marketOrder = await this.placeOrder({
             side: OrderSide.BUY,
             type: OrderType.MARKET,
             symbol: pair,
@@ -602,55 +603,130 @@ export class Bot {
             ),
           }, 'Long entry');
 
-          if (takeProfits.length > 0) {
-            // Create the take profit orders
-            for (const { price, quantityPercentage } of takeProfits) {
-              await this.placeOrder({
-                side: OrderSide.SELL,
-                type: OrderType.LIMIT,
-                symbol: pair,
-                price: price.toString(),
-                quantity: String(
-                  decimalFloor(
-                    quantity * quantityPercentage,
-                    quantityPrecision
-                  )
-                ),
-                timeInForce: TimeInForce.GTC
-              }, 'Take profit');
-            }
-          }
-
-          if (stopLoss) {
-            if (takeProfits.length > 1) {
-              await this.placeOrder({
-                side: OrderSide.SELL,
-                type: OrderType.STOP_MARKET,
-                symbol: pair,
-                stopPrice: stopLoss.toString(),
-                closePosition: 'true',
-              }, 'Stop loss');
-            } else {
-              await this.placeOrder({
-                side: OrderSide.SELL,
-                type: OrderType.STOP,
-                symbol: pair,
-                stopPrice: stopLoss.toString(),
-                price: stopLoss.toString(),
-                quantity: String(quantity),
-              }, 'Stop loss');
-            }
-          }
-
-          logBuySellExecutionOrder(
-            OrderSide.BUY,
-            asset,
-            base,
-            currentPrice,
-            quantity,
-            takeProfits,
-            stopLoss
+          // Verify the position was actually opened
+          const positionInfo = await withRetry(
+            async () => {
+              const posRisk = await binanceClient.futuresPositionRisk({ symbol: pair });
+              return posRisk[0];
+            },
+            'Verifying position'
           );
+
+          const actualPositionSize = Math.abs(Number(positionInfo.positionAmt));
+          const hasPosition = actualPositionSize > 0;
+          const expectedSize = hasShortPosition ? quantity - positionSize : quantity;
+
+          // Update position tracking state
+          this.hasOpenPosition[pair] = hasPosition;
+
+          if (!hasPosition) {
+            logError(`Market order placed but position was not opened for ${pair}`);
+            throw new Error('Market order was placed but position was not opened');
+          }
+
+          // Verify position size matches expected
+          if (Math.abs(actualPositionSize - expectedSize) > Number('1e-' + quantityPrecision)) {
+            logError(`Position size mismatch for ${pair}. Expected: ${expectedSize}, Actual: ${actualPositionSize}`);
+            // Don't throw here, just log the warning as small differences may occur due to fees/precision
+          }
+
+          debug(`Position verified for ${pair}:`);
+          debug(`- Position size: ${actualPositionSize}`);
+          debug(`- Entry price: ${positionInfo.entryPrice}`);
+          debug(`- Liquidation price: ${positionInfo.liquidationPrice}`);
+
+          // Only proceed with take profits and stop loss if market order was successful
+          if (marketOrder) {
+            if (takeProfits.length > 0) {
+              try {
+                // Create the take profit orders
+                for (const { price, quantityPercentage } of takeProfits) {
+                  await this.placeOrder({
+                    side: OrderSide.SELL,
+                    type: OrderType.LIMIT,
+                    symbol: pair,
+                    price: price.toString(),
+                    quantity: String(
+                      decimalFloor(
+                        quantity * quantityPercentage,
+                        quantityPrecision
+                      )
+                    ),
+                    timeInForce: TimeInForce.GTC
+                  }, 'Take profit');
+                }
+              } catch (err) {
+                logError(`Error placing take profit orders. Closing position...`);
+                // Close the position if TP orders fail
+                await this.placeOrder({
+                  side: OrderSide.SELL,
+                  type: OrderType.MARKET,
+                  symbol: pair,
+                  quantity: String(quantity),
+                }, 'Emergency close after TP order failure');
+                throw err;
+              }
+            }
+
+            if (stopLoss) {
+              try {
+                if (takeProfits.length > 1) {
+                  await this.placeOrder({
+                    side: OrderSide.SELL,
+                    type: OrderType.STOP_MARKET,
+                    symbol: pair,
+                    stopPrice: stopLoss.toString(),
+                    closePosition: 'true',
+                  }, 'Stop loss');
+                } else {
+                  await this.placeOrder({
+                    side: OrderSide.SELL,
+                    type: OrderType.STOP,
+                    symbol: pair,
+                    stopPrice: stopLoss.toString(),
+                    price: stopLoss.toString(),
+                    quantity: String(quantity),
+                  }, 'Stop loss');
+                }
+              } catch (err) {
+                logError(`Error placing stop loss order. Closing position...`);
+                // Close the position if SL order fails
+                await this.placeOrder({
+                  side: OrderSide.SELL,
+                  type: OrderType.MARKET,
+                  symbol: pair,
+                  quantity: String(quantity),
+                }, 'Emergency close after SL order failure');
+                throw err;
+              }
+            }
+
+            // Only log after everything is successful
+            logBuySellExecutionOrder(
+              OrderSide.BUY,
+              asset,
+              base,
+              currentPrice,
+              quantity,
+              takeProfits,
+              stopLoss
+            );
+
+            // Verify all orders were placed
+            const finalOpenOrders = await withRetry(
+              () => binanceClient.futuresOpenOrders({ symbol: pair }),
+              'Verifying final orders'
+            );
+
+            const expectedOrderCount = takeProfits.length + (stopLoss ? 1 : 0);
+            if (finalOpenOrders.length !== expectedOrderCount) {
+              logError(`Order count mismatch for ${pair}. Expected: ${expectedOrderCount}, Actual: ${finalOpenOrders.length}`);
+              debug('Current open orders:');
+              finalOpenOrders.forEach(order => {
+                debug(`- ${order.side} ${order.type} at ${order.price}, amount: ${order.origQty}`);
+              });
+            }
+          }
         } catch (err) {
           logError(`Error placing long orders for ${pair}:`, err);
           throw err;
@@ -707,7 +783,8 @@ export class Bot {
         });
 
         try {
-          await this.placeOrder({
+          // Place the market order first and wait for confirmation
+          const marketOrder = await this.placeOrder({
             side: OrderSide.SELL,
             type: OrderType.MARKET,
             symbol: pair,
@@ -716,55 +793,130 @@ export class Bot {
             ),
           }, 'Short entry');
 
-          if (takeProfits.length > 0) {
-            // Create the take profit orders
-            for (const { price, quantityPercentage } of takeProfits) {
-              await this.placeOrder({
-                side: OrderSide.BUY,
-                type: OrderType.LIMIT,
-                symbol: pair,
-                price: price.toString(),
-                quantity: String(
-                  decimalFloor(
-                    quantity * quantityPercentage,
-                    quantityPrecision
-                  )
-                ),
-                timeInForce: TimeInForce.GTC
-              }, 'Take profit');
-            }
-          }
-
-          if (stopLoss) {
-            if (takeProfits.length > 1) {
-              await this.placeOrder({
-                side: OrderSide.BUY,
-                type: OrderType.STOP_MARKET,
-                symbol: pair,
-                stopPrice: stopLoss.toString(),
-                closePosition: 'true',
-              }, 'Stop loss');
-            } else {
-              await this.placeOrder({
-                side: OrderSide.BUY,
-                type: OrderType.STOP,
-                symbol: pair,
-                stopPrice: stopLoss.toString(),
-                price: stopLoss.toString(),
-                quantity: String(quantity),
-              }, 'Stop loss');
-            }
-          }
-
-          logBuySellExecutionOrder(
-            OrderSide.SELL,
-            asset,
-            base,
-            currentPrice,
-            quantity,
-            takeProfits,
-            stopLoss
+          // Verify the position was actually opened
+          const positionInfo = await withRetry(
+            async () => {
+              const posRisk = await binanceClient.futuresPositionRisk({ symbol: pair });
+              return posRisk[0];
+            },
+            'Verifying position'
           );
+
+          const actualPositionSize = Math.abs(Number(positionInfo.positionAmt));
+          const hasPosition = actualPositionSize > 0;
+          const expectedSize = hasLongPosition ? quantity - positionSize : quantity;
+
+          // Update position tracking state
+          this.hasOpenPosition[pair] = hasPosition;
+
+          if (!hasPosition) {
+            logError(`Market order placed but position was not opened for ${pair}`);
+            throw new Error('Market order was placed but position was not opened');
+          }
+
+          // Verify position size matches expected
+          if (Math.abs(actualPositionSize - expectedSize) > Number('1e-' + quantityPrecision)) {
+            logError(`Position size mismatch for ${pair}. Expected: ${expectedSize}, Actual: ${actualPositionSize}`);
+            // Don't throw here, just log the warning as small differences may occur due to fees/precision
+          }
+
+          debug(`Position verified for ${pair}:`);
+          debug(`- Position size: ${actualPositionSize}`);
+          debug(`- Entry price: ${positionInfo.entryPrice}`);
+          debug(`- Liquidation price: ${positionInfo.liquidationPrice}`);
+
+          // Only proceed with take profits and stop loss if market order was successful
+          if (marketOrder) {
+            if (takeProfits.length > 0) {
+              try {
+                // Create the take profit orders
+                for (const { price, quantityPercentage } of takeProfits) {
+                  await this.placeOrder({
+                    side: OrderSide.BUY,
+                    type: OrderType.LIMIT,
+                    symbol: pair,
+                    price: price.toString(),
+                    quantity: String(
+                      decimalFloor(
+                        quantity * quantityPercentage,
+                        quantityPrecision
+                      )
+                    ),
+                    timeInForce: TimeInForce.GTC
+                  }, 'Take profit');
+                }
+              } catch (err) {
+                logError(`Error placing take profit orders. Closing position...`);
+                // Close the position if TP orders fail
+                await this.placeOrder({
+                  side: OrderSide.BUY,
+                  type: OrderType.MARKET,
+                  symbol: pair,
+                  quantity: String(quantity),
+                }, 'Emergency close after TP order failure');
+                throw err;
+              }
+            }
+
+            if (stopLoss) {
+              try {
+                if (takeProfits.length > 1) {
+                  await this.placeOrder({
+                    side: OrderSide.BUY,
+                    type: OrderType.STOP_MARKET,
+                    symbol: pair,
+                    stopPrice: stopLoss.toString(),
+                    closePosition: 'true',
+                  }, 'Stop loss');
+                } else {
+                  await this.placeOrder({
+                    side: OrderSide.BUY,
+                    type: OrderType.STOP,
+                    symbol: pair,
+                    stopPrice: stopLoss.toString(),
+                    price: stopLoss.toString(),
+                    quantity: String(quantity),
+                  }, 'Stop loss');
+                }
+              } catch (err) {
+                logError(`Error placing stop loss order. Closing position...`);
+                // Close the position if SL order fails
+                await this.placeOrder({
+                  side: OrderSide.BUY,
+                  type: OrderType.MARKET,
+                  symbol: pair,
+                  quantity: String(quantity),
+                }, 'Emergency close after SL order failure');
+                throw err;
+              }
+            }
+
+            // Only log after everything is successful
+            logBuySellExecutionOrder(
+              OrderSide.SELL,
+              asset,
+              base,
+              currentPrice,
+              quantity,
+              takeProfits,
+              stopLoss
+            );
+
+            // Verify all orders were placed
+            const finalOpenOrders = await withRetry(
+              () => binanceClient.futuresOpenOrders({ symbol: pair }),
+              'Verifying final orders'
+            );
+
+            const expectedOrderCount = takeProfits.length + (stopLoss ? 1 : 0);
+            if (finalOpenOrders.length !== expectedOrderCount) {
+              logError(`Order count mismatch for ${pair}. Expected: ${expectedOrderCount}, Actual: ${finalOpenOrders.length}`);
+              debug('Current open orders:');
+              finalOpenOrders.forEach(order => {
+                debug(`- ${order.side} ${order.type} at ${order.price}, amount: ${order.origQty}`);
+              });
+            }
+          }
         } catch (err) {
           logError(`Error placing short orders for ${pair}:`, err);
           throw err;
